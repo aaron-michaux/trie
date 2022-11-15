@@ -118,7 +118,11 @@ template <bool IsThreadSafe = true> struct NodeData {
   // @}
 
   NodeData(NodeType type, node_size_type payload)
-      : ref_count_{HighBit * static_cast<ref_count_type>(type) + 1}, payload_{payload} {}
+      : ref_count_{HighBit * static_cast<ref_count_type>(type) + 1}, payload_{payload} {
+    std::cout << fmt::format("make(0x{:08x}) type = {}, count = {}\n",
+                             reinterpret_cast<uintptr_t>(this),
+                             (this->type() == NodeType::Branch ? 'B' : 'L'), ref_count());
+  }
 
   ref_count_type add_ref() const {
     ref_count_type previous_count;
@@ -128,17 +132,21 @@ template <bool IsThreadSafe = true> struct NodeData {
       previous_count = ref_count_++ & RefMask;
     }
     assert(previous_count < MaxRef);
+    std::cout << fmt::format("node(0x{:08x}) addref = {}\n", reinterpret_cast<uintptr_t>(this),
+                             previous_count + 1);
     return previous_count + 1;
   }
 
   ref_count_type dec_ref() const {
     ref_count_type previous_count;
     if constexpr (IsThreadSafe) {
-      previous_count = ref_count_.fetch_add(-1, std::memory_order_acq_rel) & RefMask;
+      previous_count = ref_count_.fetch_sub(1, std::memory_order_acq_rel) & RefMask;
     } else {
       previous_count = ref_count_-- & RefMask;
     }
     assert(previous_count > 0);
+    std::cout << fmt::format("node(0x{:08x}) DECref = {}\n", reinterpret_cast<uintptr_t>(this),
+                             previous_count - 1);
     return previous_count - 1;
   }
 
@@ -365,6 +373,7 @@ template <typename T, typename Hash = std::hash<T>, typename KeyEqual = std::equ
           typename Allocator = std::allocator<T>, bool IsThreadSafe = true>
 struct NodeOps {
   using node_type = NodeData<IsThreadSafe>;
+  using node_type_ptr = node_type*;
   using hash_type = std::size_t;
   using node_size_type = typename node_type::node_size_type;
   using ref_count_type = typename node_type::ref_count_type;
@@ -380,29 +389,34 @@ struct NodeOps {
   }
 
   static void destroy(node_type* node_ptr) {
+    std::cout << fmt::format("DELETE ({})", fmt::ptr(node_ptr)) << std::endl;
+
     if (node_ptr == nullptr) {
       return;
     }
 
     if (node_ptr->type() == NodeType::Branch) {
-      auto* iterator = Branch::dense_ptr_at(node_ptr, 0); // i.e., node_type**
-      auto* end = iterator + Branch::size(node_ptr);
+      node_type_ptr* iterator = Branch::dense_ptr_at(node_ptr, 0); // i.e., node_type**
+      node_type_ptr* end = iterator + Branch::size(node_ptr);
       while (iterator != end) {
-        auto* node_ptr = *iterator++;
+        node_type_ptr node_ptr = *iterator++;
         dec_ref(node_ptr);
       }
 
     } else {
-      // Destroy payload only if its class type
+      // Destroy payload only if its of "class" type
       if constexpr (std::is_class<T>::value) {
         auto* iterator = Leaf::ptr_at(node_ptr, 0);
         auto* end = iterator + Leaf::size(node_ptr);
-        while (iterator != end)
+        while (iterator != end) {
+          std::cout << fmt::format("DESTROY ({})", fmt::ptr(iterator)) << std::endl;
           std::destroy_at(iterator++);
+        }
       }
     }
 
-    std::cout << fmt::format("DELETE ({})", fmt::ptr(node_ptr)) << std::endl;
+    std::cout << fmt::format("done ({})", fmt::ptr(node_ptr)) << std::endl;
+
     node_ptr->~node_type();
     std::free(node_ptr);
   }
@@ -435,6 +449,7 @@ struct NodeOps {
       node->add_ref();
   }
   static void dec_ref(const node_type* node) {
+    std::cout << fmt::format("Ops::Dec(0x{:08x})\n", reinterpret_cast<uintptr_t>(node));
     if (node != nullptr && node->dec_ref() == 0)
       destroy(const_cast<node_type*>(node));
   }
@@ -537,7 +552,7 @@ struct NodeOps {
         assert(popcount(last_index) == 1);              // (should be true!)
       }                                                 //
       tail = new_branch;                                // update the tail
-      last_index = index;                               // store the index for insert into tail
+      last_index = index;                               // store the index for next insert into tail
     };
 
     bool append_is_done = false;
@@ -554,6 +569,9 @@ struct NodeOps {
         *Branch::ptr_at(tail, index_rhs) = Leaf::make(std::forward<Value>(value));
         assert(Branch::is_valid_index(tail, index_lhs));
         assert(Branch::is_valid_index(tail, index_rhs));
+        assert(*Branch::ptr_at(tail, index_lhs) == existing_leaf);
+        assert(type(existing_leaf) == NodeType::Leaf);
+        assert(type(*Branch::ptr_at(tail, index_rhs)) == NodeType::Leaf);
         append_is_done = true; // the leafs are added, we're done
       }
     }
@@ -624,10 +642,9 @@ private:
     return false;
   }
 
-  template <typename Value> static bool do_insert_(node_type_ptr& root, Value&& value) {
+  template <typename Value> static node_type_ptr do_insert_(node_type_ptr root, Value&& value) {
     if (root == nullptr) { // inserting into an empty tree: trivial case
-      root = Ops::Leaf::make(std::forward<Value>(value));
-      return true;
+      return Ops::Leaf::make(std::forward<Value>(value));
     }
 
     // TO ADD:
@@ -642,13 +659,14 @@ private:
     //  Finally: update the root
     const auto hash = calculate_hash(value);
     const auto path = Ops::make_path(root, hash);
+    node_type_ptr new_root = nullptr;
 
     if (path.leaf_end == nullptr) {
-      root = Ops::rewrite_branch_path(path, hash, Ops::Leaf::make(std::forward<Value>(value)));
+      new_root = Ops::rewrite_branch_path(path, hash, Ops::Leaf::make(std::forward<Value>(value)));
 
     } else if (has_eq(value, path.leaf_end)) {
       // (2.a) Duplicate!
-      return false;
+      new_root = root;
 
     } else {
       auto* new_branch =
@@ -656,10 +674,26 @@ private:
                                 path.size,                   // The path starts here
                                 path.leaf_end,               // Includes this node
                                 std::forward<Value>(value)); // Must include this new value
-      root = Ops::rewrite_branch_path(path, hash, new_branch);
+      new_root = Ops::rewrite_branch_path(path, hash, new_branch);
     }
 
-    return true;
+    return new_root;
+  }
+
+  template <typename Value> bool insert_(Value&& value) {
+    std::cout << fmt::format("DO INSERT {}\n", value.value());
+    node_type_ptr new_root = do_insert_(root_, std::forward<Value>(value));
+    bool success = (new_root != root_);
+    std::cout << fmt::format("  success {}, root=0x{:08x} ==> 0x{:08x}\n", success,
+                             reinterpret_cast<uintptr_t>(root_),
+                             reinterpret_cast<uintptr_t>(new_root));
+    if (success) {
+      Ops::dec_ref(root_);
+      root_ = new_root;
+      ++size_;
+      std::cout << fmt::format("  size= {}\n", size_);
+    }
+    return success;
   }
 
 public:
@@ -707,15 +741,8 @@ public:
     size_ = 0;
   }
 
-  void insert(const value_type& value) {
-    if (do_insert_(root_, value))
-      ++size_;
-  }
-
-  void insert(value_type&& value) {
-    if (do_insert_(root_, value))
-      ++size_;
-  }
+  void insert(const value_type& value) { insert_(value); }
+  void insert(value_type&& value) { insert_(std::move(value)); }
 
   // emplace()...;
   // emplace_hint()...;

@@ -187,7 +187,6 @@ template <typename NodeOps> void check_leaf_invariants(const typename NodeOps::n
 template <typename NodeOps>
 void check_trie_invariants(typename NodeOps::node_type* root, std::size_t tree_size) {
   using node_type_ptr = const typename NodeOps::node_type*;
-  using NodeType = detail::NodeType;
 
   std::size_t leaf_count = 0;
 
@@ -204,9 +203,9 @@ void check_trie_invariants(typename NodeOps::node_type* root, std::size_t tree_s
       const auto node = path.nodes[i];
       const void* next_node = (i + 1 == path.size) ? path.leaf_end : path.nodes[i + 1];
       const auto sparse_index = detail::hash_chunk(hash, i);
-      CATCH_REQUIRE(NodeOps::type(node) == NodeType::Branch);
+      CATCH_REQUIRE(NodeOps::type(node) == detail::NodeType::Branch);
       CATCH_REQUIRE(NodeOps::Branch::is_valid_index(node, sparse_index));
-      // CATCH_REQUIRE(NodeOps::Branch::ptr_at(node, sparse_index) == next_node);
+      CATCH_REQUIRE(*NodeOps::Branch::ptr_at(node, sparse_index) == next_node);
     }
     CATCH_REQUIRE(path.leaf_end == leaf);
   };
@@ -375,7 +374,7 @@ CATCH_TEST_CASE("trie_ops_safe_destroy", "[trie_ops_safe_destroy]") {
   Ops::destroy(nullptr); // should not crash
 }
 
-template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
+template <typename SetType> void trie_ops_test() {
   constexpr bool skip_counter_test{std::is_same<SetType, TrivialTracedItemSetType>::value};
   uint32_t counter = 0;
 
@@ -386,14 +385,6 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
     using Ops = detail::NodeOps<typename SetType::value_type, typename SetType::hasher,
                                 typename SetType::key_equal, typename SetType::allocator_type,
                                 SetType::is_thread_safe>;
-
-    auto do_insert = [&](auto item) {
-      if constexpr (is_bulk_insert) {
-        set.bulk_insert(std::move(item));
-      } else {
-        set.insert(std::move(item));
-      }
-    };
 
     // Inserting the following sequence, to test code paths, hash is 32 bits
     // value =   1,         hash = 00|00-000|0 0000-|0000 0|000-00|00 000|0-0001
@@ -415,7 +406,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       // root -> L(1)
       const auto value = values[pos++];
       CATCH_REQUIRE(set.empty());
-      do_insert(ItemType{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
@@ -432,7 +423,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
     { // root -> B ( 1)-> L(1)
       //           (23)-> L(55)
       const auto value = values[pos++];
-      do_insert(ItemType{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
@@ -446,7 +437,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
       const auto value = values[pos++];
-      do_insert(ItemType{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
@@ -456,22 +447,20 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       dot_graph<Ops>("/tmp/2.dot", root);
     }
 
-    std::cout << "\n\n----------\n\n";
     { // root -> B ( 1)-> L(1)
       //           ( 3)-> L(3)
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
       const auto value = values[pos++];
-      do_insert(ItemType{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
       CATCH_REQUIRE((skip_counter_test || counter == pos));
       auto root = private_hack::get_root(set);
-      // check_trie_invariants<Ops>(root, set.size());
+      check_trie_invariants<Ops>(root, set.size());
       dot_graph<Ops>("/tmp/3.dot", root);
     }
-    return;
 
     { // root -> B ( 0)-> L(0)
       //           ( 1)-> L(1)
@@ -479,7 +468,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
       const auto value = values[pos++];
-      do_insert(ItemType{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
@@ -496,7 +485,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       //                    ( 3) -> L(119)
       //           (31)-> L(31)
       const auto value = values[pos++];
-      do_insert(ItemType{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
@@ -513,7 +502,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       //                    ( 3) -> L(119)
       //           (31)-> L(31)
       const auto value = values[pos++];
-      do_insert(ItemType{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
@@ -531,7 +520,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       //           (31)-> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0)-> L(31)
       //                                                                      ( 1)-> L(0x4000001F)
       const auto value = values[pos++];
-      do_insert(ItemType{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
@@ -550,7 +539,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       //                                                                      ( 1)-> L(0x4000001F)
       //                                                                      ( 3)-> L(0xC000001F)
       const auto value = values[pos++];
-      do_insert(ItemType{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
@@ -570,7 +559,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       //                                                                      ( 3)-> L(0xC000001F)
       //                                             -> B (16) -> L(0x100001F)
       const auto value = values[pos++];
-      do_insert(ItemType{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
@@ -582,7 +571,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
 
     { // duplicate: graph unchanged
       for (auto value : values) {
-        do_insert(ItemType{counter, value});
+        set.insert(ItemType{counter, value});
         CATCH_REQUIRE(!set.empty());
         CATCH_REQUIRE(set.size() == pos);
         CATCH_REQUIRE(set.size() < set.max_size());
@@ -597,10 +586,9 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
 }
 
 CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
-  // trie_ops_test<false, TracedItemSetType>();
-  // trie_ops_test<false, MoveTracedItemSetType>();
-  // trie_ops_test<false, TrivialTracedItemSetType>();
-  trie_ops_test<true, TracedItemSetType>();
+  trie_ops_test<TracedItemSetType>();
+  trie_ops_test<MoveTracedItemSetType>();
+  trie_ops_test<TrivialTracedItemSetType>();
 }
 
 } // namespace niggly::trie::test

@@ -15,6 +15,12 @@
 #include <cassert>
 #include <cstdlib>
 
+constexpr bool DebugMessages{true};
+
+std::string label_(const void* ptr) {
+  return fmt::format("0x{:08x}", reinterpret_cast<uintptr_t>(ptr));
+}
+
 namespace niggly::trie {
 
 /**
@@ -130,6 +136,11 @@ template <bool IsThreadSafe = true> struct NodeData {
       previous_count = ref_count_++ & RefMask;
     }
     assert(previous_count < MaxRef);
+
+    if constexpr (DebugMessages) {
+      std::cout << fmt::format("inc_REF({}) = {}\n", label_(this), previous_count + 1);
+    }
+
     return previous_count + 1;
   }
 
@@ -141,6 +152,11 @@ template <bool IsThreadSafe = true> struct NodeData {
       previous_count = ref_count_-- & RefMask;
     }
     assert(previous_count > 0);
+
+    if constexpr (DebugMessages) {
+      std::cout << fmt::format("DEC_REF({}) = {}\n", label_(this), previous_count - 1);
+    }
+
     return previous_count - 1;
   }
 
@@ -317,7 +333,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
                                             uint32_t index) {
     assert(IsSparseIndex);
     assert(src->type() == NodeType::Branch);
-    assert(index < 32);
+    assert(index <= SparseIndexMax);
     assert(!is_valid_index(src, index)); // Cannot overwrite existing value
 
     const auto src_bitmap = src->payload_;
@@ -325,9 +341,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     const auto dst_bitmap = (1u << index) | src_bitmap;
     const auto dst_size = src_size + 1;
 
-    auto dst = make_uninitialized(dst_size, dst_bitmap);
-    assert(size(dst) == dst_size);
-    assert(dst->type() == NodeType::Branch);
+    node_type* dst = make_uninitialized(dst_size, dst_bitmap);
 
     // Copy across the (densely stored) pointers
     auto* dst_array = dense_ptr_at(dst, 0);
@@ -387,6 +401,10 @@ struct NodeOps {
       return;
     }
 
+    if constexpr (DebugMessages) {
+      std::cout << fmt::format("ON DELETE({})\n", label_(node_ptr));
+    }
+
     if (node_ptr->type() == NodeType::Branch) {
       node_type_ptr* iterator = Branch::dense_ptr_at(node_ptr, 0); // i.e., node_type**
       node_type_ptr* end = iterator + Branch::size(node_ptr);
@@ -401,9 +419,14 @@ struct NodeOps {
         auto* iterator = Leaf::ptr_at(node_ptr, 0);
         auto* end = iterator + Leaf::size(node_ptr);
         while (iterator != end) {
+          std::cout << fmt::format("   DESTROY({})\n", label_(iterator));
           std::destroy_at(iterator++);
         }
       }
+    }
+
+    if constexpr (DebugMessages) {
+      std::cout << fmt::format("done del ({})\n", label_(node_ptr));
     }
 
     node_ptr->~node_type();
@@ -518,7 +541,33 @@ struct NodeOps {
 
     } else {
       // insert into the branch node -- expanding it
-      iterator = Branch::insert_into_branch_node(iterator, new_node, last_index);
+      std::cout << fmt::format("{}:{}, iterator={}\n", "rewrite_branch_path", __LINE__,
+                               label_(iterator));
+      auto* node = Branch::insert_into_branch_node(iterator, new_node, last_index);
+      std::cout << fmt::format("{}:{}, node    ={}\n", "rewrite_branch_path", __LINE__,
+                               label_(node));
+      if constexpr (is_bulk_insert) {
+        std::cout << fmt::format("{}:{}, path.size={}\n", "rewrite_branch_path", __LINE__,
+                                 path.size);
+        if (path.size == 1) {
+          // std::free(path.nodes[0]);
+          return node;
+
+        } else if (path.size > 1) {
+          auto* penultimate = path.nodes[last_level - 1]; // Connect penultimate to node
+          std::cout << fmt::format("{}:{}, penultimate={}\n", "rewrite_branch_path", __LINE__,
+                                   label_(penultimate));
+          const auto sparse_index = hash_chunk(hash, last_level - 1); // At this index
+          *Branch::ptr_at(penultimate, sparse_index) = node;          // overwrite
+          std::cout << fmt::format("{}:{}, about-to-decref={}\n", "rewrite_branch_path", __LINE__,
+                                   label_(iterator));
+          dec_ref(iterator); // otherwise will be orphan
+        } else {
+          iterator = node;
+        }
+      } else {
+        iterator = node;
+      }
     }
 
     if constexpr (is_bulk_insert) {

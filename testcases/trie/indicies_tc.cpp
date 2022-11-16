@@ -456,6 +456,7 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       dot_graph<Ops>("/tmp/2.dot", root);
     }
 
+    std::cout << "\n\n----------\n\n";
     { // root -> B ( 1)-> L(1)
       //           ( 3)-> L(3)
       //           (23)-> B ( 1) -> L(55)
@@ -467,9 +468,10 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
       CATCH_REQUIRE(set.size() < set.max_size());
       CATCH_REQUIRE((skip_counter_test || counter == pos));
       auto root = private_hack::get_root(set);
-      check_trie_invariants<Ops>(root, set.size());
+      // check_trie_invariants<Ops>(root, set.size());
       dot_graph<Ops>("/tmp/3.dot", root);
     }
+    return;
 
     { // root -> B ( 0)-> L(0)
       //           ( 1)-> L(1)
@@ -595,9 +597,9 @@ template <bool is_bulk_insert, typename SetType> void trie_ops_test() {
 }
 
 CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
-  trie_ops_test<false, TracedItemSetType>();
-  trie_ops_test<false, MoveTracedItemSetType>();
-  trie_ops_test<false, TrivialTracedItemSetType>();
+  // trie_ops_test<false, TracedItemSetType>();
+  // trie_ops_test<false, MoveTracedItemSetType>();
+  // trie_ops_test<false, TrivialTracedItemSetType>();
   trie_ops_test<true, TracedItemSetType>();
 }
 

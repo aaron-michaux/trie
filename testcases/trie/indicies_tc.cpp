@@ -36,8 +36,60 @@ public:
   };
 };
 
+class MoveTracedItem {
+private:
+  uint32_t& counter_;
+  std::size_t value_{0};
+
+public:
+  explicit MoveTracedItem(uint32_t& counter) : MoveTracedItem(counter, 0) {}
+  MoveTracedItem(uint32_t& counter, std::size_t value) : counter_{counter}, value_{value} {
+    counter_++;
+  }
+  MoveTracedItem(const MoveTracedItem& o) : counter_{o.counter_}, value_{o.value_} { counter_++; }
+  MoveTracedItem(MoveTracedItem&& o) noexcept : counter_{o.counter_}, value_{o.value_} {
+    counter_++;
+  }
+  ~MoveTracedItem() { counter_--; };
+  MoveTracedItem& operator=(const MoveTracedItem&) = delete;
+  MoveTracedItem& operator=(MoveTracedItem&&) = delete;
+  std::size_t value() const { return value_; }
+  bool operator==(const MoveTracedItem& o) const { return o.value() == value(); }
+
+  struct Hasher {
+    std::size_t operator()(const MoveTracedItem& item) const {
+      return static_cast<std::size_t>(item.value() & static_cast<std::size_t>(0xffffffffu));
+    }
+  };
+};
+
+class TrivialTracedItem {
+private:
+  std::size_t value_{0};
+
+public:
+  TrivialTracedItem() = default;
+  explicit TrivialTracedItem(uint32_t& counter) {}
+  TrivialTracedItem(uint32_t& counter, std::size_t value) : value_{value} {}
+  TrivialTracedItem(const TrivialTracedItem& o) = default;
+  TrivialTracedItem(TrivialTracedItem&&) = default;
+  ~TrivialTracedItem() = default;
+  TrivialTracedItem& operator=(const TrivialTracedItem&) = default;
+  TrivialTracedItem& operator=(TrivialTracedItem&&) = default;
+  std::size_t value() const { return value_; }
+  bool operator==(const TrivialTracedItem& o) const { return o.value() == value(); }
+
+  struct Hasher {
+    std::size_t operator()(const TrivialTracedItem& item) const {
+      return static_cast<std::size_t>(item.value() & static_cast<std::size_t>(0xffffffffu));
+    }
+  };
+};
+
 // Set types used in testing need to be declared here to use the "private hack"
 using TracedItemSetType = PersistentSet<TracedItem, TracedItem::Hasher>;
+using MoveTracedItemSetType = PersistentSet<MoveTracedItem, MoveTracedItem::Hasher>;
+using TrivialTracedItemSetType = PersistentSet<TrivialTracedItem, TrivialTracedItem::Hasher>;
 
 namespace private_hack {
 template <typename Tag> struct result {
@@ -57,7 +109,9 @@ template <typename Tag, typename Tag::type p> typename rob<Tag, p>::filler rob<T
 template <typename T> struct Bf { using type = detail::NodeData<T::is_thread_safe>* (T::*)(); };
 
 template class rob<Bf<TracedItemSetType>, &TracedItemSetType::get_root_>;
-template <typename T> auto get_root(T& trie) { return (trie.*result<Bf<T>>::ptr)(); }
+template <typename T> auto get_root1(T& trie) { return (trie.*result<Bf<T>>::ptr)(); }
+
+auto get_root(auto& trie) { return get_root1(*reinterpret_cast<TracedItemSetType*>(&trie)); }
 
 } // namespace private_hack
 
@@ -320,16 +374,17 @@ CATCH_TEST_CASE("trie_ops_safe_destroy", "[trie_ops_safe_destroy]") {
   Ops::destroy(nullptr); // should not crash
 }
 
-CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
+template <typename SetType> void trie_ops_test() {
+  constexpr bool skip_counter_test{std::is_same<SetType, TrivialTracedItemSetType>::value};
   uint32_t counter = 0;
-  uint32_t n_copies = 0;
 
   {
-    TracedItemSetType set;
+    SetType set;
+    using ItemType = typename SetType::value_type;
     using NodeType = detail::NodeType;
-    using Ops =
-        detail::NodeOps<decltype(set)::value_type, decltype(set)::hasher, decltype(set)::key_equal,
-                        decltype(set)::allocator_type, decltype(set)::is_thread_safe>;
+    using Ops = detail::NodeOps<typename SetType::value_type, typename SetType::hasher,
+                                typename SetType::key_equal, typename SetType::allocator_type,
+                                SetType::is_thread_safe>;
 
     // Inserting the following sequence, to test code paths, hash is 32 bits
     // value =   1,         hash = 00|00-000|0 0000-|0000 0|000-00|00 000|0-0001
@@ -339,19 +394,23 @@ CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
     // value =   0,         hash = 00|00-000|0 0000-|0000 0|000-00|00 000|0-0000
     // value =  31,         hash = 00|00-000|0 0000-|0000 0|000-00|00 000|1-1111
     // value = 0x100000000, hash = 00|00-000|0 0000-|0000 0|000-00|00 000|0-0000
+    // value = 0x4000001F,  hash = 01|00-000|0 0000-|0000 0|000-00|00 000|1-1111
+    // value = 0xC000001F,  hash = 11|00-000|0 0000-|0000 0|000-00|00 000|1-1111
+    // value = 0x100001F,   hash = 00|00-000|1 0000-|0000 0|000-00|00 000|1-1111
 
-    std::vector<std::size_t> values{{1, 55, 119, 3, 0, 31, 0x100000000}};
+    std::vector<std::size_t> values{
+        {1, 55, 119, 3, 0, 31, 0x100000000, 0x4000001F, 0xC000001F, 0x100001F}};
     auto pos = 0u;
 
     { // Insert into empty
       // root -> L(1)
       const auto value = values[pos++];
       CATCH_REQUIRE(set.empty());
-      set.insert(TracedItem{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE(counter == pos + n_copies);
+      CATCH_REQUIRE((skip_counter_test || counter == pos));
       auto root = private_hack::get_root(set);
       CATCH_REQUIRE(Ops::type(root) == NodeType::Leaf);
       CATCH_REQUIRE(Ops::size(root) == 1);
@@ -364,26 +423,25 @@ CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
     { // root -> B ( 1)-> L(1)
       //           (23)-> L(55)
       const auto value = values[pos++];
-      set.insert(TracedItem{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE(counter == pos + n_copies);
+      CATCH_REQUIRE((skip_counter_test || counter == pos));
       auto root = private_hack::get_root(set);
       check_trie_invariants<Ops>(root, set.size());
       dot_graph<Ops>("/tmp/1.dot", root);
     }
-    return;
 
     { // root -> B ( 1)-> L(1)
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
       const auto value = values[pos++];
-      set.insert(TracedItem{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE(counter == pos + n_copies);
+      CATCH_REQUIRE((skip_counter_test || counter == pos));
       auto root = private_hack::get_root(set);
       check_trie_invariants<Ops>(root, set.size());
       dot_graph<Ops>("/tmp/2.dot", root);
@@ -394,11 +452,11 @@ CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
       const auto value = values[pos++];
-      set.insert(TracedItem{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE(counter == pos + n_copies);
+      CATCH_REQUIRE((skip_counter_test || counter == pos));
       auto root = private_hack::get_root(set);
       check_trie_invariants<Ops>(root, set.size());
       dot_graph<Ops>("/tmp/3.dot", root);
@@ -410,11 +468,11 @@ CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
       const auto value = values[pos++];
-      set.insert(TracedItem{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE(counter == pos + n_copies);
+      CATCH_REQUIRE((skip_counter_test || counter == pos));
       auto root = private_hack::get_root(set);
       check_trie_invariants<Ops>(root, set.size());
       dot_graph<Ops>("/tmp/4.dot", root);
@@ -427,11 +485,11 @@ CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
       //                    ( 3) -> L(119)
       //           (31)-> L(31)
       const auto value = values[pos++];
-      set.insert(TracedItem{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE(counter == pos + n_copies);
+      CATCH_REQUIRE((skip_counter_test || counter == pos));
       auto root = private_hack::get_root(set);
       check_trie_invariants<Ops>(root, set.size());
       dot_graph<Ops>("/tmp/5.dot", root);
@@ -444,19 +502,93 @@ CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
       //                    ( 3) -> L(119)
       //           (31)-> L(31)
       const auto value = values[pos++];
-      n_copies++;
-      set.insert(TracedItem{counter, value});
+      set.insert(ItemType{counter, value});
       CATCH_REQUIRE(!set.empty());
       CATCH_REQUIRE(set.size() == pos);
       CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE(counter == pos + n_copies); // copy construction
+      CATCH_REQUIRE((skip_counter_test || counter == pos));
       auto root = private_hack::get_root(set);
       check_trie_invariants<Ops>(root, set.size());
       dot_graph<Ops>("/tmp/6.dot", root);
     }
+
+    { // root -> B ( 0)-> L(0, 0x100000000)
+      //           ( 1)-> L(1)
+      //           ( 3)-> L(3)
+      //           (23)-> B ( 1) -> L (55)
+      //                    ( 3) -> L(119)
+      //           (31)-> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0)-> L(31)
+      //                                                                      ( 1)-> L(0x4000001F)
+      const auto value = values[pos++];
+      set.insert(ItemType{counter, value});
+      CATCH_REQUIRE(!set.empty());
+      CATCH_REQUIRE(set.size() == pos);
+      CATCH_REQUIRE(set.size() < set.max_size());
+      CATCH_REQUIRE((skip_counter_test || counter == pos));
+      auto root = private_hack::get_root(set);
+      check_trie_invariants<Ops>(root, set.size());
+      dot_graph<Ops>("/tmp/7.dot", root);
+    }
+
+    { // root -> B ( 0)-> L(0, 0x100000000)
+      //           ( 1)-> L(1)
+      //           ( 3)-> L(3)
+      //           (23)-> B ( 1) -> L (55)
+      //                    ( 3) -> L(119)
+      //           (31)-> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0)-> L(31)
+      //                                                                      ( 1)-> L(0x4000001F)
+      //                                                                      ( 3)-> L(0xC000001F)
+      const auto value = values[pos++];
+      set.insert(ItemType{counter, value});
+      CATCH_REQUIRE(!set.empty());
+      CATCH_REQUIRE(set.size() == pos);
+      CATCH_REQUIRE(set.size() < set.max_size());
+      CATCH_REQUIRE((skip_counter_test || counter == pos));
+      auto root = private_hack::get_root(set);
+      check_trie_invariants<Ops>(root, set.size());
+      dot_graph<Ops>("/tmp/8.dot", root);
+    }
+
+    { // root -> B ( 0)-> L(0, 0x100000000)
+      //           ( 1)-> L(1)
+      //           ( 3)-> L(3)
+      //           (23)-> B ( 1) -> L (55)
+      //                    ( 3) -> L(119)
+      //           (31)-> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0)-> L(31)
+      //                                                                      ( 1)-> L(0x4000001F)
+      //                                                                      ( 3)-> L(0xC000001F)
+      //                                             -> B (16) -> L(0x100001F)
+      const auto value = values[pos++];
+      set.insert(ItemType{counter, value});
+      CATCH_REQUIRE(!set.empty());
+      CATCH_REQUIRE(set.size() == pos);
+      CATCH_REQUIRE(set.size() < set.max_size());
+      CATCH_REQUIRE((skip_counter_test || counter == pos));
+      auto root = private_hack::get_root(set);
+      check_trie_invariants<Ops>(root, set.size());
+      dot_graph<Ops>("/tmp/9.dot", root);
+    }
+
+    { // duplicate: graph unchanged
+      for (auto value : values) {
+        set.insert(ItemType{counter, value});
+        CATCH_REQUIRE(!set.empty());
+        CATCH_REQUIRE(set.size() == pos);
+        CATCH_REQUIRE(set.size() < set.max_size());
+        CATCH_REQUIRE((skip_counter_test || counter == pos));
+        auto root = private_hack::get_root(set);
+        check_trie_invariants<Ops>(root, set.size());
+      }
+    }
   }
 
   // CATCH_REQUIRE(counter == 0);
+}
+
+CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
+  trie_ops_test<TracedItemSetType>();
+  trie_ops_test<MoveTracedItemSetType>();
+  trie_ops_test<TrivialTracedItemSetType>();
 }
 
 } // namespace niggly::trie::test

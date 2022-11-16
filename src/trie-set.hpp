@@ -42,6 +42,8 @@ namespace niggly::trie {
 namespace detail {
 
 constexpr std::size_t MaxTrieDepth{13}; // maximum branch nodes... leaf nodes don't count here
+constexpr uint32_t SparseIndexMax{31};
+constexpr uint32_t InvalidSparseIndex{SparseIndexMax + 1};
 
 constexpr uint8_t branch_free_popcount(uint32_t x) {
   x = x - ((x >> 1) & 0x55555555u);
@@ -487,6 +489,7 @@ struct NodeOps {
    *
    * @return The new root of the tree
    */
+  template <bool is_bulk_insert>
   static node_type* rewrite_branch_path(const TreePath& path, std::size_t hash, node_type* new_node,
                                         node_type* leaf_end) {
     // When editing the tree, we need to make a copy of all the branch nodes,
@@ -502,10 +505,15 @@ struct NodeOps {
       const auto dense_index = to_dense_index(last_index, iterator->payload_);
       const auto old_leaf = *Branch::dense_ptr_at(iterator, dense_index);
       const auto skip_index =
-          (old_leaf->payload_ == leaf_end->payload_)           // means overwriting old_leaf
-              ? 0xffffffffu                                    // because it has been extended
-              : dense_index;                                   // so skip this index
-      iterator = Branch::duplicate(iterator, skip_index);      // duplicate the branch node and
+          (old_leaf->payload_ == leaf_end->payload_) // means overwriting old_leaf
+              ? InvalidSparseIndex                   // because it has been extended
+              : dense_index;                         // so skip this index
+      if constexpr (is_bulk_insert) {
+        if (skip_index != InvalidSparseIndex)
+          dec_ref(old_leaf);
+      } else {
+        iterator = Branch::duplicate(iterator, skip_index); // duplicate the branch node and
+      }
       *Branch::dense_ptr_at(iterator, dense_index) = new_node; // overwrite
 
     } else {
@@ -513,13 +521,18 @@ struct NodeOps {
       iterator = Branch::insert_into_branch_node(iterator, new_node, last_index);
     }
 
-    for (auto i = last_level; i > 0; --i) {
-      auto* node = path.nodes[i - 1];
-      const auto sparse_index = hash_chunk(hash, i - 1); // The overwrite position
-      const auto dense_index = to_dense_index(sparse_index, node->payload_);
-      auto* new_branch_node = Branch::duplicate(node, dense_index);   // Private copy
-      *Branch::dense_ptr_at(new_branch_node, dense_index) = iterator; // Do the overwite
-      iterator = new_branch_node;                                     // Update the current tail
+    if constexpr (is_bulk_insert) {
+      iterator = path.nodes[0];
+
+    } else {
+      for (auto i = last_level; i > 0; --i) {
+        auto* node = path.nodes[i - 1];
+        const auto sparse_index = hash_chunk(hash, i - 1); // The overwrite position
+        const auto dense_index = to_dense_index(sparse_index, node->payload_);
+        auto* new_branch_node = Branch::duplicate(node, dense_index);   // Private copy
+        *Branch::dense_ptr_at(new_branch_node, dense_index) = iterator; // Do the overwite
+        iterator = new_branch_node;                                     // Update the current tail
+      }
     }
 
     return iterator;
@@ -540,12 +553,13 @@ struct NodeOps {
    *
    * Returns {branch-head, new-leaf}
    */
-  template <typename Value>
+  template <bool is_bulk_insert, typename Value>
   static std::pair<node_type*, node_type*>
   branch_to_leaves(const std::size_t value_hash, uint32_t level, node_type* existing_leaf,
                    Value&& value) {
     assert(type(existing_leaf) == NodeType::Leaf);
     assert(Leaf::size(existing_leaf) > 0);
+    assert(level < MaxTrieDepth); // otherwise the hashes would have to have been equal
 
     Hash hasher;
     const auto existing_hash = hasher(*Leaf::ptr_at(existing_leaf, 0));
@@ -556,14 +570,12 @@ struct NodeOps {
       return {new_leaf, new_leaf};
     }
 
-    assert(level < MaxTrieDepth); // otherwise the hashes would have to have been equal
-
     // Otherwise, make {branch, branch, branch, ...} until the indices diverge
-    node_type* branch = nullptr;
-    node_type* tail = nullptr;
+    node_type_ptr branch = nullptr;
+    node_type_ptr tail = nullptr;
     uint32_t last_index = 0u;
 
-    auto append_to_tail = [&](node_type* new_branch, uint32_t index) {
+    auto append_to_tail = [&](node_type_ptr new_branch, uint32_t index) {
       if (branch == nullptr) {
         branch = new_branch;                            // nothing to connect
       } else {                                          //
@@ -573,7 +585,7 @@ struct NodeOps {
       last_index = index;                               // store the index for next insert into tail
     };
 
-    node_type* new_leaf = nullptr;
+    node_type_ptr new_leaf = nullptr;
     for (auto i = level; new_leaf == nullptr; ++i) {
       assert(i < MaxTrieDepth); // otherwise there'd have to be a hash collission
       const auto index_lhs = hash_chunk(existing_hash, i);
@@ -637,88 +649,6 @@ private:
   node_type* root_{nullptr}; //!< Root of the tree could be branch of leaf
   std::size_t size_{0};      //!< Current size of the Set
 
-  node_type* get_root_() { return root_; }
-
-  static size_t calculate_hash(const value_type& value) {
-    hasher hash_fun;
-    return hash_fun(value);
-  }
-
-  static bool calculate_equals(const value_type& lhs, const value_type& rhs) {
-    key_equal fun;
-    return fun(lhs, rhs);
-  }
-
-  static bool has_eq(const value_type& value, node_type_ptr leaf) {
-    assert(Ops::type(leaf) == NodeType::Leaf);
-    auto* start = Ops::Leaf::ptr_at(leaf, 0);
-    for (auto* iterator = start; iterator != start + Ops::Leaf::size(leaf); ++iterator) {
-      assert(calculate_hash(*start) == calculate_hash(*iterator));
-      if (calculate_equals(value, *iterator))
-        return true;
-    }
-    return false;
-  }
-
-  template <typename Value> static node_type_ptr do_insert_(node_type_ptr root, Value&& value) {
-    if (root == nullptr) { // inserting into an empty tree: trivial case
-      return Ops::Leaf::make(std::forward<Value>(value));
-    }
-
-    // TO ADD:
-    //  1. If there's no leaf node at the end, then
-    //     (a) rewrite the branch
-    //     (b) insert the new leaf into the tail of the rewrite
-    //  2. If there is an existing leaf
-    //     (a) if:   eq, then insert as failed
-    //     (b) else: rewrite the branch
-    //     (c)       create a new path to discriminate between the existing and new leaf
-    //     (d)       join the two paths together
-    //  Finally: update the root
-    const auto hash = calculate_hash(value);
-    const auto path = Ops::make_path(root, hash);
-    node_type_ptr new_root = nullptr;
-
-    if (path.leaf_end == nullptr) {
-      auto new_leaf = Ops::Leaf::make(std::forward<Value>(value));
-      new_root = Ops::rewrite_branch_path(path, hash, new_leaf, new_leaf);
-
-    } else if (has_eq(value, path.leaf_end)) {
-      // (2.a) Duplicate!
-      new_root = root;
-
-    } else {
-      auto [new_branch, leaf_end] =
-          Ops::branch_to_leaves(hash,                        // Hash of the value
-                                path.size,                   // The path starts here
-                                path.leaf_end,               // Includes this node
-                                std::forward<Value>(value)); // Must include this new value
-      new_root = Ops::rewrite_branch_path(path, hash, new_branch, leaf_end);
-    }
-
-    return new_root;
-  }
-
-  template <typename Value> bool insert_(Value&& value) {
-    node_type_ptr new_root = do_insert_(root_, std::forward<Value>(value));
-    const bool success = (new_root != root_);
-
-    if (success) {
-      if (root_ != nullptr && Ops::type(root_) == NodeType::Leaf &&
-          Ops::type(new_root) == NodeType::Branch) {
-        // Never `dec_ref` a root_ "leaf node", when new_root is a Branch
-        // because that leaf will have become part of the tree.
-        //
-        // If new_root is a branch then there was a collision at the root
-      } else {
-        Ops::dec_ref(root_);
-      }
-      root_ = new_root;
-      ++size_;
-    }
-    return success;
-  }
-
 public:
   //@{ Construction/Destruction
   PersistentSet() = default;
@@ -764,8 +694,11 @@ public:
     size_ = 0;
   }
 
-  void insert(const value_type& value) { insert_(value); }
-  void insert(value_type&& value) { insert_(std::move(value)); }
+  void insert(const value_type& value) { insert_<false>(value); }
+  void insert(value_type&& value) { insert_<false>(std::move(value)); }
+
+  void bulk_insert(const value_type& value) { insert_<true>(value); }
+  void bulk_insert(value_type&& value) { insert_<true>(std::move(value)); }
 
   // emplace()...;
   // emplace_hint()...;
@@ -810,6 +743,94 @@ public:
   //@}
 
 private:
+  node_type* get_root_() { return root_; }
+
+  static size_t calculate_hash(const value_type& value) {
+    hasher hash_fun;
+    return hash_fun(value);
+  }
+
+  static bool calculate_equals(const value_type& lhs, const value_type& rhs) {
+    key_equal fun;
+    return fun(lhs, rhs);
+  }
+
+  static bool has_eq(const value_type& value, node_type_ptr leaf) {
+    assert(Ops::type(leaf) == NodeType::Leaf);
+    auto* start = Ops::Leaf::ptr_at(leaf, 0);
+    for (auto* iterator = start; iterator != start + Ops::Leaf::size(leaf); ++iterator) {
+      assert(calculate_hash(*start) == calculate_hash(*iterator));
+      if (calculate_equals(value, *iterator))
+        return true;
+    }
+    return false;
+  }
+
+  template <bool is_bulk_insert, typename Value>
+  static std::pair<node_type_ptr, bool> do_insert_(node_type_ptr root, Value&& value) {
+    if (root == nullptr) { // inserting into an empty tree: trivial case
+      return {Ops::Leaf::make(std::forward<Value>(value)), true};
+    }
+
+    // TO ADD:
+    //  1. If there's no leaf node at the end, then
+    //     (a) rewrite the branch
+    //     (b) insert the new leaf into the tail of the rewrite
+    //  2. If there is an existing leaf
+    //     (a) if:   eq, then insert as failed
+    //     (b) else: rewrite the branch
+    //     (c)       create a new path to discriminate between the existing and new leaf
+    //     (d)       join the two paths together
+    //  Finally: update the root
+    const auto hash = calculate_hash(value);
+    const auto path = Ops::make_path(root, hash);
+    node_type_ptr new_root = nullptr;
+    bool success = false;
+
+    if (path.leaf_end == nullptr) {
+      auto new_leaf = Ops::Leaf::make(std::forward<Value>(value));
+      new_root = Ops::template rewrite_branch_path<is_bulk_insert>(path, hash, new_leaf, new_leaf);
+      success = true;
+
+    } else if (has_eq(value, path.leaf_end)) {
+      // (2.a) Duplicate!
+      new_root = root;
+
+    } else {
+      auto [new_branch, leaf_end] = Ops::template branch_to_leaves<is_bulk_insert>(
+          hash,                        // Hash of the value
+          path.size,                   // The path starts here
+          path.leaf_end,               // Includes this node
+          std::forward<Value>(value)); // Must include this new value
+      new_root =
+          Ops::template rewrite_branch_path<is_bulk_insert>(path, hash, new_branch, leaf_end);
+      success = true;
+    }
+
+    return {new_root, success};
+  }
+
+  template <bool is_bulk_insert, typename Value> bool insert_(Value&& value) {
+    auto [new_root, success] = do_insert_<is_bulk_insert>(root_, std::forward<Value>(value));
+
+    if (success) {
+      if constexpr (!is_bulk_insert) {
+        if (root_ != nullptr && Ops::type(root_) == NodeType::Leaf &&
+            Ops::type(new_root) == NodeType::Branch) {
+          // Never `dec_ref` a root_ "leaf node", when new_root is a Branch
+          // because that leaf will have become part of the tree.
+          //
+          // If new_root is a branch then there was a collision at the root
+        } else {
+          Ops::dec_ref(root_);
+        }
+      }
+      root_ = new_root;
+      ++size_;
+    }
+
+    return success;
+  }
 };
 
 // template <typename ItemType, typename Hash, typename KeyEqual, typename Allocator,

@@ -205,7 +205,7 @@ void check_trie_invariants(typename NodeOps::node_type* root, std::size_t tree_s
       const auto sparse_index = detail::hash_chunk(hash, i);
       CATCH_REQUIRE(NodeOps::type(node) == detail::NodeType::Branch);
       CATCH_REQUIRE(NodeOps::Branch::is_valid_index(node, sparse_index));
-      // CATCH_REQUIRE(NodeOps::Branch::ptr_at(node, sparse_index) == next_node);
+      CATCH_REQUIRE(*NodeOps::Branch::ptr_at(node, sparse_index) == next_node);
     }
     CATCH_REQUIRE(path.leaf_end == leaf);
   };

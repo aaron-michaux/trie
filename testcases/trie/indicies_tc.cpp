@@ -239,11 +239,11 @@ CATCH_TEST_CASE("sparse_index", "[sparse_index]") {
   // 4 == 100b
   const uint32_t bitmap = (1u << 0) | (1u << 7) | (1u << 16) | (1u << 22) | (1u << 31);
   CATCH_REQUIRE(detail::popcount(bitmap) == 5);
-  CATCH_REQUIRE(detail::sparse_index(0u, bitmap) == 0);
-  CATCH_REQUIRE(detail::sparse_index(7u, bitmap) == 1);
-  CATCH_REQUIRE(detail::sparse_index(16u, bitmap) == 2);
-  CATCH_REQUIRE(detail::sparse_index(22u, bitmap) == 3);
-  CATCH_REQUIRE(detail::sparse_index(31u, bitmap) == 4);
+  CATCH_REQUIRE(detail::to_dense_index(0u, bitmap) == 0);
+  CATCH_REQUIRE(detail::to_dense_index(7u, bitmap) == 1);
+  CATCH_REQUIRE(detail::to_dense_index(16u, bitmap) == 2);
+  CATCH_REQUIRE(detail::to_dense_index(22u, bitmap) == 3);
+  CATCH_REQUIRE(detail::to_dense_index(31u, bitmap) == 4);
 
   // This indices are invalid
   CATCH_REQUIRE(detail::is_valid_index(1u, bitmap) == false);

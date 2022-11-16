@@ -60,7 +60,7 @@ constexpr uint8_t popcount(uint32_t x) {
 #endif
 }
 
-constexpr uint32_t sparse_index(uint32_t index, uint32_t bitmap) {
+constexpr uint32_t to_dense_index(uint32_t index, uint32_t bitmap) {
   assert(index < sizeof(uint32_t) * 8);
   const auto mask = (1u << index) - 1; // index=4  ==>  mask=0x0111b
   return popcount(bitmap & mask);      // count the position branchlessly
@@ -206,7 +206,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   static value_type* ptr_at(const node_type* node, node_size_type index) {
     if constexpr (IsSparseIndex) {
       assert(index < 32);
-      return dense_ptr_at(node, sparse_index(index, node->payload_));
+      return dense_ptr_at(node, to_dense_index(index, node->payload_));
     } else {
       return dense_ptr_at(node, index);
     }
@@ -285,7 +285,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     return ptr;
   }
 
-  static node_type* duplicate(node_type* node) {
+  static node_type* duplicate(node_type* node, uint32_t dense_index_to_skip) {
     assert(IsSparseIndex);                    // only makes sense for sparse-index
     assert(node->type() == NodeType::Branch); // and this too
     const auto sz = size(node);
@@ -297,9 +297,14 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     std::memcpy(dst, src, sz * sizeof(value_type));
 
     // Must bump up all references
-    for (auto iterator = dst; iterator != dst + sz; ++iterator) {
-      (*iterator)->add_ref();
+    for (auto i = 0u; i < sz; ++i) {
+      if (i == dense_index_to_skip)
+        continue;
+      dst[i]->add_ref();
     }
+    // for (auto iterator = dst; iterator != dst + sz; ++iterator) {
+    //   (*iterator)->add_ref();
+    // }
     return ptr;
   }
 
@@ -325,7 +330,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     // Copy across the (densely stored) pointers
     auto* dst_array = dense_ptr_at(dst, 0);
     const auto* src_array = dense_ptr_at(src, 0);
-    auto insert_pos = sparse_index(index, dst_bitmap);
+    auto insert_pos = to_dense_index(index, dst_bitmap);
 
     for (auto index = 0u; index < insert_pos; ++index) {
       dst_array[index] = src_array[index];
@@ -454,7 +459,7 @@ struct NodeOps {
     TreePath path;
     auto node = root;
     while (node != nullptr && type(node) == NodeType::Branch) {
-      auto sparse_index = detail::hash_chunk(hash, path.size);
+      auto sparse_index = hash_chunk(hash, path.size);
       path.push(node);
       assert(!Branch::is_valid_index(node, sparse_index) ||
              Branch::ptr_at(node, sparse_index) != nullptr);
@@ -468,6 +473,17 @@ struct NodeOps {
 
   /**
    * Rewrites the branch nodes of the path, adding in the new branch at the end
+   * @param path The path to rewrite
+   * @param hash The hash associated with the value inserted (into leaf_end)
+   * @param new_node The new node to append -- could be a branch node
+   * @param leaf_end The node guaranteed to contain the newly inserted value
+   *
+   * Must know `leaf_end` to prevent a resource leak. Normally when appending
+   * a leaf node, it is going to be reused by some other node, or it will have
+   * been moved somewhere else in the tree. However, in the case of a hash
+   * collision, the new leaf will contain all the collided values, and the
+   * previous leaf should not be duplicated, because it will no longer be used
+   * anywhere in this tree.
    *
    * @return The new root of the tree
    */
@@ -480,44 +496,50 @@ struct NodeOps {
 
     // Working backwards, so start with the tail
     const uint32_t last_level = path.size - 1;
-    auto last_index = detail::hash_chunk(hash, last_level);
+    auto last_index = hash_chunk(hash, last_level);
     node_type* iterator = path.nodes[last_level];
     if (Branch::is_valid_index(iterator, last_index)) {
-      assert(path.leaf_end != nullptr);
-      assert(*Branch::ptr_at(iterator, last_index) == path.leaf_end);
-      iterator = Branch::duplicate(iterator); // duplicate the branch node and
-      assert(*Branch::ptr_at(iterator, last_index) == path.leaf_end);
-      node_type_ptr& overwrite_node = *Branch::ptr_at(iterator, last_index);
-      if (size(overwrite_node) != size(leaf_end)) {
-        // The leaf node is being replaced with a bigger version... and hence
-        // `overwrite_node` will be orphaned if not decremented
-        dec_ref(overwrite_node);
-      }
-      overwrite_node = new_node; // overwite the leaf node with new_node
+      const auto dense_index = to_dense_index(last_index, iterator->payload_);
+      const auto old_leaf = *Branch::dense_ptr_at(iterator, dense_index);
+      const auto skip_index =
+          (old_leaf->payload_ == leaf_end->payload_)           // means overwriting old_leaf
+              ? 0xffffffffu                                    // because it has been extended
+              : dense_index;                                   // so skip this index
+      iterator = Branch::duplicate(iterator, skip_index);      // duplicate the branch node and
+      *Branch::dense_ptr_at(iterator, dense_index) = new_node; // overwrite
 
     } else {
       // insert into the branch node -- expanding it
-      assert(path.leaf_end == nullptr);
       iterator = Branch::insert_into_branch_node(iterator, new_node, last_index);
     }
 
     for (auto i = last_level; i > 0; --i) {
-      auto* new_branch_node = Branch::duplicate(path.nodes[i - 1]);  // Private copy
-      const auto sparse_index = detail::hash_chunk(hash, i - 1);     // The overwrite position
-      assert(Branch::is_valid_index(new_branch_node, sparse_index)); // Must overwrite existing
-      node_type_ptr& overwrite_node = *Branch::ptr_at(new_branch_node, sparse_index);
-      dec_ref(overwrite_node);    // Overwriting this node... dec_ref to prevent it being orphaned
-      overwrite_node = iterator;  // Do the overwite
-      iterator = new_branch_node; // Update the current tail
-    }
-
-    if (path.nodes.size() > 2) {
-      // dec_ref(path.nodes[1]); // Otherwise this node would be orphaned
+      auto* node = path.nodes[i - 1];
+      const auto sparse_index = hash_chunk(hash, i - 1); // The overwrite position
+      const auto dense_index = to_dense_index(sparse_index, node->payload_);
+      auto* new_branch_node = Branch::duplicate(node, dense_index);   // Private copy
+      *Branch::dense_ptr_at(new_branch_node, dense_index) = iterator; // Do the overwite
+      iterator = new_branch_node;                                     // Update the current tail
     }
 
     return iterator;
   }
 
+  /**
+   * It may be necessary to create a sequence of "common" branch nodes when
+   * inserting a new leaf. This method handles creating the new leaf, and
+   * creating however many common branch nodes required to insert leaf from the
+   * existing position (level).
+   *
+   *    [...] -> old-leaf
+   *
+   *        goes to
+   *
+   *    [...] -> branch-head -> branch -> branch -> old-leaf
+   *                                             -> new-leaf
+   *
+   * Returns {branch-head, new-leaf}
+   */
   template <typename Value>
   static std::pair<node_type*, node_type*>
   branch_to_leaves(const std::size_t value_hash, uint32_t level, node_type* existing_leaf,

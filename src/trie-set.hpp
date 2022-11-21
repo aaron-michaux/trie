@@ -302,9 +302,6 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
         continue;
       dst[i]->add_ref();
     }
-    // for (auto iterator = dst; iterator != dst + sz; ++iterator) {
-    //   (*iterator)->add_ref();
-    // }
     return ptr;
   }
 
@@ -599,6 +596,106 @@ struct NodeOps {
   //@}
 };
 
+// Forward? Bidirection?
+template <typename NodeOps, bool is_const_reference> class Iterator {
+private:
+  static constexpr uint32_t NotADepth{static_cast<uint32_t>(-1)};
+
+  using value_type = std::conditional<is_const_reference, const typename NodeOps::value_type,
+                                      typename NodeOps::value_type>::type;
+  using reference_type = value_type&;
+  using node_type = typename NodeOps::node_type;
+  using node_type_ptr = node_type*;
+
+  std::array<node_type_ptr, MaxTrieDepth + 1> path_; // +1 for the leaf node
+  std::array<uint32_t, MaxTrieDepth + 1> position_;  // of iteration in path_
+  uint32_t depth_;
+
+public:
+  struct MakeBeginTag {};
+  struct MakeEndTag {};
+
+  Iterator(const node_type_ptr root, MakeBeginTag tag) : depth_{0} {
+    path_[0] = root;
+    position_[0] = 0;
+    if (root != nullptr) {
+      descend_to_leftmost_leaf_();
+    }
+  }
+
+  Iterator(const node_type_ptr root, MakeEndTag tag) : depth_{NotADepth} {
+    path_[0] = root;
+    position_[0] = 0;
+  }
+
+  bool operator==(const Iterator& other) const {
+    return (depth_ == other.depth_) ||
+           ((cursor_() == other.cursor_()) && (current_() == other.current_()));
+  }
+
+  bool operator!=(const Iterator& other) const { return !(*this == other); }
+
+  reference_type operator++() {
+    increment_();
+    return *this;
+  }
+
+  value_type operator++(int) {
+    value_type current{*this};
+    operator++();
+    return current;
+  }
+
+  reference_type operator*() const {
+    assert(current_() != nullptr);
+    assert(NodeOps::type(current_()) == NodeType::Leaf);
+    assert(cursor_() < NodeOps::size(current_()));
+    return *NodeOps::ptr_at(current_(), cursor_());
+  }
+
+private:
+  constexpr uint32_t is_end_() { return depth_ == NotADepth; }
+
+  node_type_ptr current_() const { return path_[depth_]; }
+
+  uint32_t& cursor_() { return position_[depth_]; }
+  const uint32_t& cursor_() const { return position_[depth_]; }
+
+  void increment_() {
+    if (is_end_()) {
+      return; // This is an increment beyond the end of the collection
+    }
+
+    assert(NodeOps::type(current_()) == NodeType::Leaf); // precondition
+    if (++cursor_() < NodeOps::size(current_()))
+      return;
+
+    while (true) {
+      assert(depth_ > 0);
+      --depth_;                                      // iterate upwards
+      assert(is_branch_(current_()));                // precondition
+      if (++cursor_() < NodeOps::size(current_())) { // found a new node (branch or leaf)
+        descend_to_leftmost_leaf_();                 // increments depth (if branch)
+        break;                                       // and we're done
+      } else if (depth_ == 0) {
+        depth_ = NotADepth; // We're beyond the end,
+        break;              // and we're done
+      }
+    }
+
+    assert(is_end_() || NodeOps::type(current_()) == NodeType::Leaf); // postcondition
+  }
+
+  void descend_to_leftmost_leaf_() {
+    while (is_branch_(current_())) { // Descend to left-most leaf
+      assert(depth_ + 1 < path_.size());
+      path_[depth_ + 1] = NodeOps::ptr_at(current_(), cursor_());
+      position_[depth_ + 1] = 0;
+      ++depth_;
+    }
+  }
+};
+
 } // namespace detail
 
 // ----------------------------------------------------------------------------------- PersistentSet
@@ -610,6 +707,12 @@ template <typename ItemType,                             // Type of item to stor
           bool IsThreadSafe = true                       // True if Set is threadsafe
           >
 class PersistentSet {
+private:
+  using Ops = detail::NodeOps<ItemType, Hash, KeyEqual, Allocator, IsThreadSafe>;
+  using node_type = typename Ops::node_type;
+  using node_type_ptr = node_type*;
+  using NodeType = detail::NodeType;
+
 public:
   //@{
   using key_type = ItemType;
@@ -623,20 +726,111 @@ public:
   using const_reference = const value_type&;
   using pointer = std::allocator_traits<Allocator>::pointer;
   using const_pointer = std::allocator_traits<Allocator>::const_pointer;
+  using iterator = typename detail::Iterator<Ops, false>;
+  using const_iterator = typename detail::Iterator<Ops, true>;
   static constexpr bool is_thread_safe = IsThreadSafe;
-  // using iterator = ;
-  // using const_iterator = ;
   //@}
 
 private:
-  using Ops = detail::NodeOps<ItemType, Hash, KeyEqual, Allocator, IsThreadSafe>;
-  using node_type = typename Ops::node_type;
-  using node_type_ptr = node_type*;
-  using NodeType = detail::NodeType;
-
   node_type* root_{nullptr}; //!< Root of the tree could be branch of leaf
   std::size_t size_{0};      //!< Current size of the Set
 
+public:
+  //@{ Construction/Destruction
+  PersistentSet() = default;
+  PersistentSet(const PersistentSet& other) { *this = other; }
+  PersistentSet(PersistentSet&& other) noexcept { swap(*this, other); }
+  ~PersistentSet() { Ops::dec_ref(root_); }
+  //@}
+
+  //@{
+  // allocator_type get_allocator() const noexcept;
+  //@}
+
+  //@{ Assignment
+  PersistentSet& operator=(const PersistentSet& other) {
+    Ops::dec_ref(root_);
+    root_ = other.root_;
+    size_ = other.size_;
+    Ops::add_ref(root_);
+    return *this;
+  }
+
+  PersistentSet& operator=(PersistentSet&& other) noexcept {
+    swap(*this, other);
+    return *this;
+  }
+  //@}
+
+  //@{ Iterators
+  iterator begin() { return iterator{root_, typename iterator::MakeBeginTag{}}; }
+  const_iterator begin() const { return cbegin(); }
+  const_iterator cbegin() const { return const_iterator{root_, typename iterator::MakeBeginTag{}}; }
+
+  iterator end() { return iterator{root_, typename iterator::MakeEndTag{}}; }
+  const_iterator end() const { return cend(); }
+  const_iterator cend() const { return const_iterator{root_, typename iterator::MakeEndTag{}}; }
+  //@}
+
+  //@{ Capacity
+  bool empty() const { return size() == 0; }
+  std::size_t size() const { return size_; }
+  std::size_t max_size() const { return std::numeric_limits<std::size_t>::max(); }
+  //@}
+
+  //@{ Modifiers
+  void clear() {
+    Ops::dec_ref(root_);
+    root_ = nullptr;
+    size_ = 0;
+  }
+
+  void insert(const value_type& value) { insert_(value); }
+  void insert(value_type&& value) { insert_(std::move(value)); }
+
+  // emplace()...;
+  // emplace_hint()...;
+  // erase()...;
+  void swap(PersistentSet& other) noexcept { // Should not be able
+    std::swap(root_, other.root_);
+    std::swap(size_, other.size_);
+  }
+  //@}
+
+  //@{ Lookup
+  // std::size_t count() const;
+  // find();
+  // contains();
+  // equal_range();
+  //@}
+
+  //@{ Compatibility
+  // rehash();
+  // reserve();
+  // load_factor();
+  // max_load_factor();
+  //@}
+
+  //@{ Observers
+  // hash_function
+  // key_eq
+  //@}
+
+  //@{ Friends
+  friend bool operator==(const PersistentSet& lhs, const PersistentSet& rhs) noexcept {
+    return lhs.root_ == rhs.root_;
+  }
+
+  friend bool operator!=(const PersistentSet& lhs, const PersistentSet& rhs) noexcept {
+    return !(lhs == rhs);
+  }
+
+  // std::erase_if
+
+  friend void swap(PersistentSet& lhs, PersistentSet& rhs) noexcept { lhs.swap(rhs); }
+  //@}
+
+private:
   node_type* get_root_() { return root_; }
 
   static size_t calculate_hash(const value_type& value) {
@@ -718,98 +912,6 @@ private:
     }
     return success;
   }
-
-public:
-  //@{ Construction/Destruction
-  PersistentSet() = default;
-  PersistentSet(const PersistentSet& other) { *this = other; }
-  PersistentSet(PersistentSet&& other) noexcept { swap(*this, other); }
-  ~PersistentSet() { Ops::dec_ref(root_); }
-  //@}
-
-  //@{
-  // allocator_type get_allocator() const noexcept;
-  //@}
-
-  //@{ Assignment
-  PersistentSet& operator=(const PersistentSet& other) {
-    Ops::dec_ref(root_);
-    root_ = other.root_;
-    size_ = other.size_;
-    Ops::add_ref(root_);
-    return *this;
-  }
-
-  PersistentSet& operator=(PersistentSet&& other) noexcept {
-    swap(*this, other);
-    return *this;
-  }
-  //@}
-
-  //@{ Iterators
-  // begin/begin/cbegin
-  // end/end/cend
-  //@}
-
-  //@{ Capacity
-  bool empty() const { return size() == 0; }
-  std::size_t size() const { return size_; }
-  std::size_t max_size() const { return std::numeric_limits<std::size_t>::max(); }
-  //@}
-
-  //@{ Modifiers
-  void clear() {
-    Ops::dec_ref(root_);
-    root_ = nullptr;
-    size_ = 0;
-  }
-
-  void insert(const value_type& value) { insert_(value); }
-  void insert(value_type&& value) { insert_(std::move(value)); }
-
-  // emplace()...;
-  // emplace_hint()...;
-  // erase()...;
-  void swap(PersistentSet& other) noexcept { // Should not be able
-    std::swap(root_, other.root_);
-    std::swap(size_, other.size_);
-  }
-  //@}
-
-  //@{ Lookup
-  // std::size_t count() const;
-  // find();
-  // contains();
-  // equal_range();
-  //@}
-
-  //@{ Compatibility
-  // rehash();
-  // reserve();
-  // load_factor();
-  // max_load_factor();
-  //@}
-
-  //@{ Observers
-  // hash_function
-  // key_eq
-  //@}
-
-  //@{ Friends
-  friend bool operator==(const PersistentSet& lhs, const PersistentSet& rhs) noexcept {
-    return lhs.root_ == rhs.root_;
-  }
-
-  friend bool operator!=(const PersistentSet& lhs, const PersistentSet& rhs) noexcept {
-    return !(lhs == rhs);
-  }
-
-  // std::erase_if
-
-  friend void swap(PersistentSet& lhs, PersistentSet& rhs) noexcept { lhs.swap(rhs); }
-  //@}
-
-private:
 };
 
 // template <typename ItemType, typename Hash, typename KeyEqual, typename Allocator,

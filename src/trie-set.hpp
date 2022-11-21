@@ -618,19 +618,23 @@ public:
   Iterator(const node_type_ptr root, MakeBeginTag tag) : depth_{0} {
     path_[0] = root;
     position_[0] = 0;
-    if (root != nullptr) {
-      descend_to_leftmost_leaf_();
-    }
+    if (root == nullptr)
+      depth_ = NotADepth;          // At the end
+    else                           //
+      descend_to_leftmost_leaf_(); // Find first leaf
+    assert_invariant_();
   }
 
   Iterator(const node_type_ptr root, MakeEndTag tag) : depth_{NotADepth} {
     path_[0] = root;
-    position_[0] = 0;
+    assert_invariant_();
   }
 
   bool operator==(const Iterator& other) const {
-    return (depth_ == other.depth_) ||
-           ((cursor_() == other.cursor_()) && (current_() == other.current_()));
+    return (is_end_() && other.is_end_())        // both at `end()`
+           || (depth_ == other.depth_            // at same depth (so neither at `end()`)
+               && current_() == other.current_() // pointer and cursor
+               && cursor_() == other.cursor_()); // are same
   }
 
   bool operator!=(const Iterator& other) const { return !(*this == other); }
@@ -640,30 +644,44 @@ public:
     return *this;
   }
 
+  reference_type operator--() {
+    decrement_();
+    return *this;
+  }
+
   value_type operator++(int) {
     value_type current{*this};
     operator++();
     return current;
   }
 
+  value_type operator--(int) {
+    value_type current{*this};
+    operator--();
+    return current;
+  }
+
   reference_type operator*() const {
     assert(current_() != nullptr);
+    assert(!is_end_());
     assert(NodeOps::type(current_()) == NodeType::Leaf);
     assert(cursor_() < NodeOps::size(current_()));
     return *NodeOps::ptr_at(current_(), cursor_());
   }
 
 private:
+  void assert_invariant_() const {
+    assert(is_end_() || NodeOps::type(current_()) == NodeType::Leaf);
+  }
+
   constexpr uint32_t is_end_() { return depth_ == NotADepth; }
-
   node_type_ptr current_() const { return path_[depth_]; }
-
   uint32_t& cursor_() { return position_[depth_]; }
   const uint32_t& cursor_() const { return position_[depth_]; }
 
   void increment_() {
     if (is_end_()) {
-      return; // This is an increment beyond the end of the collection
+      return; // Attempt to increment beyond the end of the collection
     }
 
     assert(NodeOps::type(current_()) == NodeType::Leaf); // precondition
@@ -683,7 +701,40 @@ private:
       }
     }
 
-    assert(is_end_() || NodeOps::type(current_()) == NodeType::Leaf); // postcondition
+    assert_invariant_();
+  }
+
+  void decrement_() {
+    if (is_end_()) {
+      if (path_[0] != nullptr) {      // if not an empty tree
+        depth_ = 0;                   // Reset to root
+        cursor_() = 0;                //
+        descend_to_rightmost_leaf_(); // And find rightmost leaf
+      }
+      return;
+    }
+
+    assert(NodeOps::type(current_()) == NodeType::Leaf); // precondition
+    if (cursor_() > 0) {
+      --cursor_();
+      return;
+    }
+
+    while (true) {
+      assert(depth_ > 0);
+      --depth_;
+      assert(is_branch(current_()));
+      if (cursor_() > 0) {
+        --cursor_();
+        descend_to_rightmost_leaf_();
+        break;
+      } else if (depth_ == 0) {
+        depth_ = NotADepth; // trying to move beyond the beginning
+        break;
+      }
+    }
+
+    assert_invariant_();
   }
 
   void descend_to_leftmost_leaf_() {
@@ -693,6 +744,19 @@ private:
       position_[depth_ + 1] = 0;
       ++depth_;
     }
+
+    assert_invariant_();
+  }
+
+  void descend_to_rightmost_leaf_() {
+    while (is_branch_(current_())) {
+      assert(depth_ + 1 < path_.size());
+      path_[depth_ + 1] = NodeOps::ptr_at(current_(), cursor_());
+      position_[depth_ + 1] = NodeOps::size(path_[depth_ + 1]) - 1;
+      assert(NodeOps::size(path_[depth_ + 1]) > 0);
+      ++depth_;
+    }
+    assert_invariant_();
   }
 };
 

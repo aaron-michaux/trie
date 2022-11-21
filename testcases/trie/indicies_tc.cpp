@@ -216,6 +216,42 @@ void check_trie_invariants(typename NodeOps::node_type* root, std::size_t tree_s
   CATCH_REQUIRE(leaf_count == tree_size);
 }
 
+template <typename Set, typename ForwardItr>
+void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
+  std::vector<std::size_t> values{start, finish};
+  auto is_value = [&values](std::size_t value) {
+    return std::find(std::begin(values), std::end(values), value) != std::end(values);
+  };
+
+  {
+    std::size_t counter = 0;
+    for (auto ii = set.begin(); ii != set.end(); ++ii) {
+      CATCH_REQUIRE(is_value((*ii).value()));
+      ++counter;
+    }
+    CATCH_REQUIRE(counter == values.size());
+  }
+
+  {
+    const Set& cset = set;
+    std::size_t counter = 0;
+    for (auto ii = cset.begin(); ii != cset.end(); ++ii) {
+      CATCH_REQUIRE(is_value((*ii).value()));
+      ++counter;
+    }
+    CATCH_REQUIRE(counter == values.size());
+  }
+
+  // {
+  //   std::size_t counter = 0;
+  //   for (auto ii = set.cbegin(); ii != set.cend(); ++ii) {
+  //     CATCH_REQUIRE(is_value(*ii));
+  //     ++counter;
+  //   }
+  //   CATCH_REQUIRE(counter == values.size());
+  // }
+}
+
 CATCH_TEST_CASE("max_trie_depth", "[max_trie_depth]") {
   const auto hash_bits = sizeof(std::size_t) * 8;                      // 64 bits
   const auto chunk_bits = std::size_t{5};                              // 32 fits in 5 bits
@@ -566,6 +602,7 @@ template <typename SetType> void trie_ops_test() {
       CATCH_REQUIRE((skip_counter_test || counter == pos));
       auto root = private_hack::get_root(set);
       check_trie_invariants<Ops>(root, set.size());
+      check_trie_iterators(set, std::begin(values), std::begin(values) + pos);
       dot_graph<Ops>("/tmp/9.dot", root);
     }
 

@@ -361,6 +361,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
 template <typename T, typename Hash = std::hash<T>, typename KeyEqual = std::equal_to<T>,
           typename Allocator = std::allocator<T>, bool IsThreadSafe = true>
 struct NodeOps {
+  using value_type = T;
   using node_type = NodeData<IsThreadSafe>;
   using node_type_ptr = node_type*;
   using hash_type = std::size_t;
@@ -601,9 +602,8 @@ template <typename NodeOps, bool is_const_reference> class Iterator {
 private:
   static constexpr uint32_t NotADepth{static_cast<uint32_t>(-1)};
 
-  using value_type = std::conditional<is_const_reference, const typename NodeOps::value_type,
-                                      typename NodeOps::value_type>::type;
-  using reference_type = value_type&;
+  using value_type = typename NodeOps::value_type;
+  using reference_type = std::conditional<is_const_reference, const value_type&, value_type&>::type;
   using node_type = typename NodeOps::node_type;
   using node_type_ptr = node_type*;
 
@@ -641,12 +641,12 @@ public:
 
   reference_type operator++() {
     increment_();
-    return *this;
+    return operator*();
   }
 
   reference_type operator--() {
     decrement_();
-    return *this;
+    return operator*();
   }
 
   value_type operator++(int) {
@@ -666,7 +666,7 @@ public:
     assert(!is_end_());
     assert(NodeOps::type(current_()) == NodeType::Leaf);
     assert(cursor_() < NodeOps::size(current_()));
-    return *NodeOps::ptr_at(current_(), cursor_());
+    return *NodeOps::Leaf::ptr_at(current_(), cursor_());
   }
 
 private:
@@ -674,7 +674,8 @@ private:
     assert(is_end_() || NodeOps::type(current_()) == NodeType::Leaf);
   }
 
-  constexpr uint32_t is_end_() { return depth_ == NotADepth; }
+  bool is_branch_(node_type_ptr node) const { return NodeOps::type(node) == NodeType::Branch; }
+  constexpr uint32_t is_end_() const { return depth_ == NotADepth; }
   node_type_ptr current_() const { return path_[depth_]; }
   uint32_t& cursor_() { return position_[depth_]; }
   const uint32_t& cursor_() const { return position_[depth_]; }
@@ -740,7 +741,7 @@ private:
   void descend_to_leftmost_leaf_() {
     while (is_branch_(current_())) { // Descend to left-most leaf
       assert(depth_ + 1 < path_.size());
-      path_[depth_ + 1] = NodeOps::ptr_at(current_(), cursor_());
+      path_[depth_ + 1] = *NodeOps::Branch::dense_ptr_at(current_(), cursor_());
       position_[depth_ + 1] = 0;
       ++depth_;
     }
@@ -751,7 +752,7 @@ private:
   void descend_to_rightmost_leaf_() {
     while (is_branch_(current_())) {
       assert(depth_ + 1 < path_.size());
-      path_[depth_ + 1] = NodeOps::ptr_at(current_(), cursor_());
+      path_[depth_ + 1] = *NodeOps::Branch::dense_ptr_at(current_(), cursor_());
       position_[depth_ + 1] = NodeOps::size(path_[depth_ + 1]) - 1;
       assert(NodeOps::size(path_[depth_ + 1]) > 0);
       ++depth_;
@@ -829,11 +830,15 @@ public:
   //@{ Iterators
   iterator begin() { return iterator{root_, typename iterator::MakeBeginTag{}}; }
   const_iterator begin() const { return cbegin(); }
-  const_iterator cbegin() const { return const_iterator{root_, typename iterator::MakeBeginTag{}}; }
+  const_iterator cbegin() const {
+    return const_iterator{root_, typename const_iterator::MakeBeginTag{}};
+  }
 
   iterator end() { return iterator{root_, typename iterator::MakeEndTag{}}; }
   const_iterator end() const { return cend(); }
-  const_iterator cend() const { return const_iterator{root_, typename iterator::MakeEndTag{}}; }
+  const_iterator cend() const {
+    return const_iterator{root_, typename const_iterator::MakeEndTag{}};
+  }
   //@}
 
   //@{ Capacity

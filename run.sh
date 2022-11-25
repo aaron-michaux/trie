@@ -7,7 +7,7 @@ PPWD="$(cd "$(dirname "$0")"; pwd)"
 # ------------------------------------------------------------ Parse Commandline
 
 CONFIG=asan
-TARGET_FILE0=zero
+TARGET_FILE0=trie
 TOOLCHAIN=gcc-12
 FEEDBACK=0
 NO_BUILD=0
@@ -57,7 +57,6 @@ show_usage()
       example       build the examples
       test          build and run test cases
       coverage      build and run test cases with text code-coverage output
-      coveragehtml  build and run test cases with html code-coverage output
 
    Examples:
 
@@ -71,7 +70,7 @@ show_usage()
       > $(basename $0) unity release
 
       # Make html test coverage using clang-14, passing arguments "1" "2" "3" to the executable
-      > $(basename $0) clang-14 coveragehtml -- 1 2 3
+      > $(basename $0) clang-14 coverage -- 1 2 3
 
 EOF
 }
@@ -110,9 +109,7 @@ while [ "$#" -gt "0" ] ; do
     [ "$1" = "test" ]      && BUILD_TESTS="1"  && BUILD_EXAMPLES=1 && shift && continue
     [ "$1" = "bench" ]     && BENCHMARK=1      && shift && continue
     [ "$1" = "examples" ]  && BUILD_EXAMPLES=1 && shift && continue
-    [ "$1" = "coverage" ]  && RULE="coverage"  \
-        && BUILD_TESTS=1 && COVERAGE=1 && CONFIG=debug && shift && continue
-    [ "$1" = "coveragehtml" ]  && RULE="coverage_html"  \
+    [ "$1" = "coverage" ]  && RULE="coverage_html"  \
         && BUILD_TESTS=1 && COVERAGE_HTML=1 && CONFIG=debug && shift && continue
 
     [ "$1" = "-h" ] || [ "$1" = "--help" ] && show_usage && exit 0

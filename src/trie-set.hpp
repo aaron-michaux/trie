@@ -43,6 +43,8 @@ namespace detail {
 
 constexpr std::size_t MaxTrieDepth{13}; // maximum branch nodes... leaf nodes don't count here
 
+constexpr uint32_t NotAnIndex{static_cast<uint32_t>(-1)};
+
 constexpr uint8_t branch_free_popcount(uint32_t x) {
   x = x - ((x >> 1) & 0x55555555u);
   x = (x & 0x33333333u) + ((x >> 2) & 0x33333333u);
@@ -161,6 +163,8 @@ template <bool IsThreadSafe = true> struct NodeData {
 template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> struct BaseNodeOps {
 
   using node_type = NodeData<IsThreadSafe>;
+  using node_type_ptr = node_type*;
+  using key_type = T;
   using value_type = T;
   using hash_type = std::size_t;
   using node_size_type = typename node_type::node_size_type;
@@ -306,6 +310,28 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   }
 
   /**
+   * Duplicates a leaf node, optionally omitting the value at `index_to_skip`
+   */
+  static node_type* duplicate_leaf(const node_type* node, uint32_t index_to_skip) {
+    assert(!IsSparseIndex);                 // only makes sense for leaf nodes
+    assert(node->type() == NodeType::Leaf); // and this too
+    const auto sz = size(node);
+    node_type* new_node = nullptr;
+    if (index_to_skip < sz) {
+      make_uninitialized(sz - 1, sz - 1);
+      uint32_t write_index = 0;
+      for (auto index = 0u; index != sz; ++index) {
+        if (index != index_to_skip)
+          copy_one(*ptr_at(node, index), ptr_at(node, write_index++));
+      }
+    } else {
+      new_node = make_uninitialized(sz, sz);
+      copy_payload_to(node, new_node);
+    }
+    return new_node;
+  }
+
+  /**
    * Creates a new branch node, with `value` inserted at `index`
    */
   static node_type* insert_into_branch_node(const node_type* src, value_type value,
@@ -361,6 +387,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
 template <typename T, typename Hash = std::hash<T>, typename KeyEqual = std::equal_to<T>,
           typename Allocator = std::allocator<T>, bool IsThreadSafe = true>
 struct NodeOps {
+  using key_type = T;
   using value_type = T;
   using node_type = NodeData<IsThreadSafe>;
   using node_type_ptr = node_type*;
@@ -511,7 +538,13 @@ struct NodeOps {
       iterator = Branch::insert_into_branch_node(iterator, new_node, last_index);
     }
 
-    for (auto i = last_level; i > 0; --i) {
+    return splice(path, hash, last_level, iterator);
+  }
+
+  static node_type* splice(const TreePath& path, std::size_t hash, uint32_t level,
+                           node_type* splice_node) {
+    auto iterator = splice_node;
+    for (auto i = level; i > 0; --i) {
       auto* node = path.nodes[i - 1];
       const auto sparse_index = hash_chunk(hash, i - 1); // The overwrite position
       const auto dense_index = to_dense_index(sparse_index, node->payload_);
@@ -519,7 +552,6 @@ struct NodeOps {
       *Branch::dense_ptr_at(new_branch_node, dense_index) = iterator; // Do the overwite
       iterator = new_branch_node;                                     // Update the current tail
     }
-
     return iterator;
   }
 
@@ -594,19 +626,89 @@ struct NodeOps {
 
     return {branch, new_leaf};
   }
+
+  static size_t calculate_hash(const value_type& value) {
+    hasher hash_fun;
+    return hash_fun(value);
+  }
+
+  static bool calculate_equals(const value_type& lhs, const value_type& rhs) {
+    key_equal fun;
+    return fun(lhs, rhs);
+  }
+
+  static uint32_t get_index_in_leaf(const value_type& value, node_type_ptr leaf) {
+    if (leaf != nullptr) {
+      assert(type(leaf) == NodeType::Leaf);
+      auto* start = Leaf::ptr_at(leaf, 0);
+      for (auto* iterator = start; iterator != start + Leaf::size(leaf); ++iterator) {
+        assert(calculate_hash(*start) == calculate_hash(*iterator));
+        if (calculate_equals(value, *iterator))
+          return static_cast<uint32_t>(iterator - start);
+      }
+    }
+    return detail::NotAnIndex;
+  }
+
+  static node_type* erase(node_type* root, const key_type& key) {
+    // 1. Find the node (if it's not found, return zero)
+    // 2. Delete the leaf, and "roll up"
+
+    const auto hash = calculate_hash(key);
+    const auto path = make_path(root, hash);
+    const auto index = get_index_in_leaf(key, path.leaf_end);
+    node_type_ptr new_root = nullptr;
+
+    if (index == NotAnIndex) { // value not in tree
+      new_root = root;
+
+    } else if (size(path.leaf_end) > 1) { // Special case: deleting from a "many value" leaf
+      auto new_leaf = Leaf::duplicate_leaf(path.leaf_end, index);
+      new_root = rewrite_branch_path(path, hash, new_leaf, new_leaf);
+
+    } else if (path.size == 0) { // Special case: deleting the last item in the trie
+      new_root = nullptr;
+
+    } else { // Need to "roll up" path, until we find a branch with more than one child
+      auto level = path.size - 1;
+      while (true) {
+        const auto last_index = detail::hash_chunk(hash, level);
+        node_type* iterator = path.nodes[level];
+        assert(type(iterator) == NodeType::Leaf || Branch::is_valid_index(iterator, last_index));
+        if (size(iterator) > 1) {
+          const auto skip_index = to_dense_index(last_index, iterator->payload_);
+          auto new_node = Branch::duplicate(iterator, skip_index); // duplicate the branch node
+          new_root = splice(path, hash, level, new_node);
+          break;
+
+        } else if (level == 0) { // deleting a long branch to a single node
+          new_root = nullptr;
+          break;
+
+        } else {
+          --level;
+        }
+      }
+    }
+
+    return new_root;
+  }
+
   //@}
 };
 
 // Forward? Bidirection?
 template <typename NodeOps, bool is_const_reference> class Iterator {
-private:
-  static constexpr uint32_t NotADepth{static_cast<uint32_t>(-1)};
-
+public:
+  using iterator_category = std::bidirectional_iterator_tag;
   using value_type = typename NodeOps::value_type;
   using reference_type = std::conditional<is_const_reference, const value_type&, value_type&>::type;
+  using pointer_type = std::conditional<is_const_reference, const value_type*, value_type*>::type;
   using node_type = typename NodeOps::node_type;
   using node_type_ptr = node_type*;
 
+private:
+  static constexpr uint32_t NotADepth{static_cast<uint32_t>(-1)};
   std::array<node_type_ptr, MaxTrieDepth + 1> path_; // +1 for the leaf node
   std::array<uint32_t, MaxTrieDepth + 1> position_;  // of iteration in path_
   uint32_t depth_;
@@ -639,34 +741,36 @@ public:
 
   bool operator!=(const Iterator& other) const { return !(*this == other); }
 
-  reference_type operator++() {
+  Iterator& operator++() {
     increment_();
-    return operator*();
+    return *this;
   }
 
-  reference_type operator--() {
+  Iterator& operator--() {
     decrement_();
-    return operator*();
+    return *this;
   }
 
-  value_type operator++(int) {
-    value_type current{*this};
-    operator++();
-    return current;
+  Iterator operator++(int) {
+    Iterator tmp = *this;
+    ++(*this);
+    return tmp;
   }
 
-  value_type operator--(int) {
-    value_type current{*this};
-    operator--();
-    return current;
+  Iterator operator--(int) {
+    Iterator tmp = *this;
+    --(*this);
+    return tmp;
   }
 
-  reference_type operator*() const {
+  reference_type operator*() const { return *operator->(); }
+
+  pointer_type operator->() const {
     assert(current_() != nullptr);
     assert(!is_end_());
     assert(NodeOps::type(current_()) == NodeType::Leaf);
     assert(cursor_() < NodeOps::size(current_()));
-    return *NodeOps::Leaf::ptr_at(current_(), cursor_());
+    return NodeOps::Leaf::ptr_at(current_(), cursor_());
   }
 
 private:
@@ -690,15 +794,15 @@ private:
       return;
 
     while (true) {
-      assert(depth_ > 0);
+      if (depth_ == 0) {
+        depth_ = NotADepth; // We're beyond the end,
+        break;              // and we're done
+      }
       --depth_;                                      // iterate upwards
       assert(is_branch_(current_()));                // precondition
       if (++cursor_() < NodeOps::size(current_())) { // found a new node (branch or leaf)
         descend_to_leftmost_leaf_();                 // increments depth (if branch)
         break;                                       // and we're done
-      } else if (depth_ == 0) {
-        depth_ = NotADepth; // We're beyond the end,
-        break;              // and we're done
       }
     }
 
@@ -707,10 +811,10 @@ private:
 
   void decrement_() {
     if (is_end_()) {
-      if (path_[0] != nullptr) {      // if not an empty tree
-        depth_ = 0;                   // Reset to root
-        cursor_() = 0;                //
-        descend_to_rightmost_leaf_(); // And find rightmost leaf
+      if (path_[0] != nullptr) {                   // if not an empty tree
+        depth_ = 0;                                // Reset to root
+        cursor_() = NodeOps::size(current_()) - 1; //
+        descend_to_rightmost_leaf_();              // And find rightmost leaf
       }
       return;
     }
@@ -722,15 +826,15 @@ private:
     }
 
     while (true) {
-      assert(depth_ > 0);
+      if (depth_ == 0) {
+        depth_ = NotADepth; // We're beyond the end,
+        break;              // and we're done
+      }
       --depth_;
-      assert(is_branch(current_()));
+      assert(is_branch_(current_()));
       if (cursor_() > 0) {
         --cursor_();
         descend_to_rightmost_leaf_();
-        break;
-      } else if (depth_ == 0) {
-        depth_ = NotADepth; // trying to move beyond the beginning
         break;
       }
     }
@@ -854,8 +958,20 @@ public:
     size_ = 0;
   }
 
-  void insert(const value_type& value) { insert_(value); }
-  void insert(value_type&& value) { insert_(std::move(value)); }
+  bool insert(const value_type& value) { return insert_(value); }
+  bool insert(value_type&& value) { return insert_(std::move(value)); }
+  template <class InputIt> void insert(InputIt first, InputIt last) {
+    while (first != last) {
+      insert_(*first);
+      ++first;
+    }
+  }
+  void insert(std::initializer_list<value_type> ilist) {
+    for (auto&& item : ilist)
+      insert_(std::move(item));
+  }
+
+  size_type erase(const key_type& key) { return erase_(key); }
 
   // emplace()...;
   // emplace_hint()...;
@@ -902,26 +1018,24 @@ public:
 private:
   node_type* get_root_() { return root_; }
 
-  static size_t calculate_hash(const value_type& value) {
-    hasher hash_fun;
-    return hash_fun(value);
-  }
+  static size_t calculate_hash(const value_type& value) { return Ops::calculate_hash(value); }
 
   static bool calculate_equals(const value_type& lhs, const value_type& rhs) {
-    key_equal fun;
-    return fun(lhs, rhs);
+    return Ops::calculate_equals(lhs, rhs);
   }
 
-  static bool has_eq(const value_type& value, node_type_ptr leaf) {
-    assert(Ops::type(leaf) == NodeType::Leaf);
-    auto* start = Ops::Leaf::ptr_at(leaf, 0);
-    for (auto* iterator = start; iterator != start + Ops::Leaf::size(leaf); ++iterator) {
-      assert(calculate_hash(*start) == calculate_hash(*iterator));
-      if (calculate_equals(value, *iterator))
-        return true;
-    }
-    return false;
-  }
+  // static uint32_t get_index_in_leaf(const value_type& value, node_type_ptr leaf) {
+  //   if (leaf != nullptr) {
+  //     assert(Ops::type(leaf) == NodeType::Leaf);
+  //     auto* start = Ops::Leaf::ptr_at(leaf, 0);
+  //     for (auto* iterator = start; iterator != start + Ops::Leaf::size(leaf); ++iterator) {
+  //       assert(calculate_hash(*start) == calculate_hash(*iterator));
+  //       if (calculate_equals(value, *iterator))
+  //         return static_cast<uint32_t>(iterator - start);
+  //     }
+  //   }
+  //   return detail::NotAnIndex;
+  // }
 
   template <typename Value> static node_type_ptr do_insert_(node_type_ptr root, Value&& value) {
     if (root == nullptr) { // inserting into an empty tree: trivial case
@@ -946,7 +1060,7 @@ private:
       auto new_leaf = Ops::Leaf::make(std::forward<Value>(value));
       new_root = Ops::rewrite_branch_path(path, hash, new_leaf, new_leaf);
 
-    } else if (has_eq(value, path.leaf_end)) {
+    } else if (Ops::get_index_in_leaf(value, path.leaf_end) != detail::NotAnIndex) {
       // (2.a) Duplicate!
       new_root = root;
 
@@ -981,13 +1095,18 @@ private:
     }
     return success;
   }
-};
 
-// template <typename ItemType, typename Hash, typename KeyEqual, typename Allocator,
-//           bool IsThreadSafe>
-// friend void swap(PersistentSet<ItemType, Hash, KeyEqual, Allocator, IsThreadSafe>& lhs,
-//                  PersistentSet<ItemType, Hash, KeyEqual, Allocator, IsThreadSafe>& rhs) {
-//   lhs.swap(rhs);
-// }
+  size_type erase_(const key_type& key) {
+    node_type_ptr new_root = Ops::erase(root_, key);
+    const bool success = (new_root != root_);
+    if (success) {
+      Ops::dec_ref(root_);
+      root_ = new_root;
+      --size_;
+      return 1;
+    }
+    return 0;
+  }
+};
 
 } // namespace niggly::trie

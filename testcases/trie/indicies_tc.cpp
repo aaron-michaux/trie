@@ -242,14 +242,28 @@ void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
     CATCH_REQUIRE(counter == values.size());
   }
 
-  // {
-  //   std::size_t counter = 0;
-  //   for (auto ii = set.cbegin(); ii != set.cend(); ++ii) {
-  //     CATCH_REQUIRE(is_value(*ii));
-  //     ++counter;
-  //   }
-  //   CATCH_REQUIRE(counter == values.size());
-  // }
+  {
+    std::size_t counter = 0;
+    for (auto ii = set.cbegin(); ii != set.cend(); ++ii) {
+      CATCH_REQUIRE(is_value((*ii).value()));
+      ++counter;
+    }
+    CATCH_REQUIRE(counter == values.size());
+  }
+
+  {
+    std::size_t counter = 0;
+    auto ii = set.end();
+    while (true) {
+      if (ii == set.begin())
+        break;
+      --ii;
+      auto value = (*ii).value();
+      CATCH_REQUIRE(is_value((*ii).value()));
+      ++counter;
+    }
+    CATCH_REQUIRE(counter == values.size());
+  }
 }
 
 CATCH_TEST_CASE("max_trie_depth", "[max_trie_depth]") {
@@ -417,7 +431,7 @@ template <typename SetType> void trie_ops_test() {
   {
     SetType set;
     using ItemType = typename SetType::value_type;
-    using NodeType = detail::NodeType;
+    // using NodeType = detail::NodeType;
     using Ops = detail::NodeOps<typename SetType::value_type, typename SetType::hasher,
                                 typename SetType::key_equal, typename SetType::allocator_type,
                                 SetType::is_thread_safe>;
@@ -438,64 +452,44 @@ template <typename SetType> void trie_ops_test() {
         {1, 55, 119, 3, 0, 31, 0x100000000, 0x4000001F, 0xC000001F, 0x100001F}};
     auto pos = 0u;
 
+    uint32_t test_number = 0;
+    auto run_standard_tests = [&set, &counter, &values, &test_number](uint32_t pos) {
+      const auto value = values[pos];
+      const auto new_size = pos + 1;
+      bool was_inserted = set.insert(ItemType{counter, value});
+      CATCH_REQUIRE(was_inserted == true);
+      CATCH_REQUIRE(!set.empty());
+      CATCH_REQUIRE(set.size() == new_size);
+      CATCH_REQUIRE(set.size() < set.max_size());
+      CATCH_REQUIRE((skip_counter_test || counter == new_size));
+      auto root = private_hack::get_root(set);
+      check_trie_invariants<Ops>(root, set.size());
+      check_trie_iterators(set, std::begin(values), std::begin(values) + new_size);
+      dot_graph<Ops>(fmt::format("/tmp/{}.dot", test_number++).c_str(), root);
+    };
+
     { // Insert into empty
       // root -> L(1)
-      const auto value = values[pos++];
       CATCH_REQUIRE(set.empty());
-      set.insert(ItemType{counter, value});
-      CATCH_REQUIRE(!set.empty());
-      CATCH_REQUIRE(set.size() == pos);
-      CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE((skip_counter_test || counter == pos));
-      auto root = private_hack::get_root(set);
-      CATCH_REQUIRE(Ops::type(root) == NodeType::Leaf);
-      CATCH_REQUIRE(Ops::size(root) == 1);
-      CATCH_REQUIRE(Ops::Leaf::is_valid_index(root, 0) == true);
-      CATCH_REQUIRE(Ops::Leaf::is_valid_index(root, 1) == false);
-      check_trie_invariants<Ops>(root, set.size());
-      dot_graph<Ops>("/tmp/0.dot", root);
+      run_standard_tests(pos++);
     }
 
     { // root -> B ( 1)-> L(1)
       //           (23)-> L(55)
-      const auto value = values[pos++];
-      set.insert(ItemType{counter, value});
-      CATCH_REQUIRE(!set.empty());
-      CATCH_REQUIRE(set.size() == pos);
-      CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE((skip_counter_test || counter == pos));
-      auto root = private_hack::get_root(set);
-      check_trie_invariants<Ops>(root, set.size());
-      dot_graph<Ops>("/tmp/1.dot", root);
+      run_standard_tests(pos++);
     }
 
     { // root -> B ( 1)-> L(1)
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
-      const auto value = values[pos++];
-      set.insert(ItemType{counter, value});
-      CATCH_REQUIRE(!set.empty());
-      CATCH_REQUIRE(set.size() == pos);
-      CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE((skip_counter_test || counter == pos));
-      auto root = private_hack::get_root(set);
-      check_trie_invariants<Ops>(root, set.size());
-      dot_graph<Ops>("/tmp/2.dot", root);
+      run_standard_tests(pos++);
     }
 
     { // root -> B ( 1)-> L(1)
       //           ( 3)-> L(3)
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
-      const auto value = values[pos++];
-      set.insert(ItemType{counter, value});
-      CATCH_REQUIRE(!set.empty());
-      CATCH_REQUIRE(set.size() == pos);
-      CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE((skip_counter_test || counter == pos));
-      auto root = private_hack::get_root(set);
-      check_trie_invariants<Ops>(root, set.size());
-      dot_graph<Ops>("/tmp/3.dot", root);
+      run_standard_tests(pos++);
     }
 
     { // root -> B ( 0)-> L(0)
@@ -503,15 +497,7 @@ template <typename SetType> void trie_ops_test() {
       //           ( 3)-> L(3)
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
-      const auto value = values[pos++];
-      set.insert(ItemType{counter, value});
-      CATCH_REQUIRE(!set.empty());
-      CATCH_REQUIRE(set.size() == pos);
-      CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE((skip_counter_test || counter == pos));
-      auto root = private_hack::get_root(set);
-      check_trie_invariants<Ops>(root, set.size());
-      dot_graph<Ops>("/tmp/4.dot", root);
+      run_standard_tests(pos++);
     }
 
     { // root -> B ( 0)-> L(0)
@@ -520,15 +506,7 @@ template <typename SetType> void trie_ops_test() {
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
       //           (31)-> L(31)
-      const auto value = values[pos++];
-      set.insert(ItemType{counter, value});
-      CATCH_REQUIRE(!set.empty());
-      CATCH_REQUIRE(set.size() == pos);
-      CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE((skip_counter_test || counter == pos));
-      auto root = private_hack::get_root(set);
-      check_trie_invariants<Ops>(root, set.size());
-      dot_graph<Ops>("/tmp/5.dot", root);
+      run_standard_tests(pos++);
     }
 
     { // root -> B ( 0)-> L(0, 0x100000000)
@@ -537,15 +515,7 @@ template <typename SetType> void trie_ops_test() {
       //           (23)-> B ( 1) -> L(55)
       //                    ( 3) -> L(119)
       //           (31)-> L(31)
-      const auto value = values[pos++];
-      set.insert(ItemType{counter, value});
-      CATCH_REQUIRE(!set.empty());
-      CATCH_REQUIRE(set.size() == pos);
-      CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE((skip_counter_test || counter == pos));
-      auto root = private_hack::get_root(set);
-      check_trie_invariants<Ops>(root, set.size());
-      dot_graph<Ops>("/tmp/6.dot", root);
+      run_standard_tests(pos++);
     }
 
     { // root -> B ( 0)-> L(0, 0x100000000)
@@ -555,15 +525,7 @@ template <typename SetType> void trie_ops_test() {
       //                    ( 3) -> L(119)
       //           (31)-> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0)-> L(31)
       //                                                                      ( 1)-> L(0x4000001F)
-      const auto value = values[pos++];
-      set.insert(ItemType{counter, value});
-      CATCH_REQUIRE(!set.empty());
-      CATCH_REQUIRE(set.size() == pos);
-      CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE((skip_counter_test || counter == pos));
-      auto root = private_hack::get_root(set);
-      check_trie_invariants<Ops>(root, set.size());
-      dot_graph<Ops>("/tmp/7.dot", root);
+      run_standard_tests(pos++);
     }
 
     { // root -> B ( 0)-> L(0, 0x100000000)
@@ -574,15 +536,7 @@ template <typename SetType> void trie_ops_test() {
       //           (31)-> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0) -> B ( 0)-> L(31)
       //                                                                      ( 1)-> L(0x4000001F)
       //                                                                      ( 3)-> L(0xC000001F)
-      const auto value = values[pos++];
-      set.insert(ItemType{counter, value});
-      CATCH_REQUIRE(!set.empty());
-      CATCH_REQUIRE(set.size() == pos);
-      CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE((skip_counter_test || counter == pos));
-      auto root = private_hack::get_root(set);
-      check_trie_invariants<Ops>(root, set.size());
-      dot_graph<Ops>("/tmp/8.dot", root);
+      run_standard_tests(pos++);
     }
 
     { // root -> B ( 0)-> L(0, 0x100000000)
@@ -594,21 +548,13 @@ template <typename SetType> void trie_ops_test() {
       //                                                                      ( 1)-> L(0x4000001F)
       //                                                                      ( 3)-> L(0xC000001F)
       //                                             -> B (16) -> L(0x100001F)
-      const auto value = values[pos++];
-      set.insert(ItemType{counter, value});
-      CATCH_REQUIRE(!set.empty());
-      CATCH_REQUIRE(set.size() == pos);
-      CATCH_REQUIRE(set.size() < set.max_size());
-      CATCH_REQUIRE((skip_counter_test || counter == pos));
-      auto root = private_hack::get_root(set);
-      check_trie_invariants<Ops>(root, set.size());
-      check_trie_iterators(set, std::begin(values), std::begin(values) + pos);
-      dot_graph<Ops>("/tmp/9.dot", root);
+      run_standard_tests(pos++);
     }
 
     { // duplicate: graph unchanged
       for (auto value : values) {
-        set.insert(ItemType{counter, value});
+        bool was_inserted = set.insert(ItemType{counter, value});
+        CATCH_REQUIRE(was_inserted == false);
         CATCH_REQUIRE(!set.empty());
         CATCH_REQUIRE(set.size() == pos);
         CATCH_REQUIRE(set.size() < set.max_size());
@@ -616,6 +562,14 @@ template <typename SetType> void trie_ops_test() {
         auto root = private_hack::get_root(set);
         check_trie_invariants<Ops>(root, set.size());
       }
+    }
+
+    { // Attempt to remove 'non-element'; graph unchanged
+      bool was_erased = set.erase(ItemType{counter, 0xff112233u});
+      CATCH_REQUIRE(was_erased == false);
+      CATCH_REQUIRE(set.size() == pos);
+      auto root = private_hack::get_root(set);
+      check_trie_invariants<Ops>(root, set.size());
     }
   }
 

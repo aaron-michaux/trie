@@ -6,8 +6,9 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
-#include <memory>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <type_traits>
 
 #include <cstdint>
@@ -422,7 +423,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
 // ----------------------------------------------------------------------------------------- NodeOps
 
 template <typename T, typename Hash = std::hash<T>, typename KeyEqual = std::equal_to<T>,
-          typename Allocator = std::allocator<T>, bool IsThreadSafe = true>
+          bool IsThreadSafe = true>
 struct NodeOps {
   using key_type = T;
   using value_type = T;
@@ -675,7 +676,7 @@ struct NodeOps {
     return fun(lhs, rhs);
   }
 
-  static uint32_t get_index_in_leaf(const value_type& value, node_ptr_type leaf) {
+  static uint32_t get_index_in_leaf(const value_type& value, node_const_ptr_type leaf) {
     if (leaf != nullptr) {
       assert(type(leaf) == NodeType::Leaf);
       auto* start = Leaf::ptr_at(leaf, 0);
@@ -765,8 +766,67 @@ struct NodeOps {
     // (If null, this would be deleting the last node.)
     return leaf_in_hand;
   }
-
   //@}
+
+  template <typename Value> static node_ptr_type do_insert(node_ptr_type root, Value&& value) {
+    if (root == nullptr) { // inserting into an empty tree: trivial case
+      return Leaf::make(std::forward<Value>(value));
+    }
+
+    // TO ADD:
+    //  1. If there's no leaf node at the end, then
+    //     (a) rewrite the branch
+    //     (b) insert the new leaf into the tail of the rewrite
+    //  2. If there is an existing leaf
+    //     (a) if:   eq, then insert as failed
+    //     (b) else: rewrite the branch
+    //     (c)       create a new path to discriminate between the existing and new leaf
+    //     (d)       join the two paths together
+    //  Finally: update the root
+    const auto hash = calculate_hash(value);
+    const auto path = make_path(root, hash);
+    node_ptr_type new_root = nullptr;
+
+    if (path.leaf_end == nullptr) {
+      auto new_leaf = Leaf::make(std::forward<Value>(value));
+      new_root = rewrite_branch_path(path, hash, new_leaf, new_leaf);
+
+    } else if (get_index_in_leaf(value, path.leaf_end) != NotAnIndex) {
+      // (2.a) Duplicate!
+      new_root = root;
+
+    } else {
+      auto [new_branch, leaf_end] =
+          branch_to_leaves(hash,                        // Hash of the value
+                           path.size,                   // The path starts here
+                           path.leaf_end,               // Includes this node
+                           std::forward<Value>(value)); // Must include this new value
+      new_root = rewrite_branch_path(path, hash, new_branch, leaf_end);
+    }
+
+    return new_root;
+  }
+
+  static const value_type* find(node_const_ptr_type root, const key_type& key) {
+    auto node = root;
+    auto level = 0u;
+    const auto hash = calculate_hash(key);
+    if (node != nullptr) {
+      while (type(node) == NodeType::Branch) {
+        const auto sparse_index = hash_chunk(hash, level++);
+        if (Branch::is_valid_index(node, sparse_index))
+          node = *Branch::ptr_at(node, sparse_index);
+        else
+          break;
+      }
+      if (type(node) == NodeType::Leaf) {
+        const auto index = get_index_in_leaf(key, node);
+        if (index != NotAnIndex)
+          return Leaf::ptr_at(node, index);
+      }
+    }
+    return nullptr;
+  }
 };
 
 // Forward? Bidirection?
@@ -942,15 +1002,14 @@ private:
 
 // ----------------------------------------------------------------------------------- PersistentSet
 
-template <typename ItemType,                             // Type of item to store
-          typename Hash = std::hash<ItemType>,           // Hash function for item
-          typename KeyEqual = std::equal_to<ItemType>,   // Equality comparision for Item
-          typename Allocator = std::allocator<ItemType>, // Allocator for Item
-          bool IsThreadSafe = true                       // True if Set is threadsafe
+template <typename ItemType,                           // Type of item to store
+          typename Hash = std::hash<ItemType>,         // Hash function for item
+          typename KeyEqual = std::equal_to<ItemType>, // Equality comparision for Item
+          bool IsThreadSafe = true                     // True if Set is threadsafe
           >
 class PersistentSet {
 private:
-  using Ops = detail::NodeOps<ItemType, Hash, KeyEqual, Allocator, IsThreadSafe>;
+  using Ops = detail::NodeOps<ItemType, Hash, KeyEqual, IsThreadSafe>;
   using node_type = typename Ops::node_type;
   using node_ptr_type = node_type*;
   using node_const_ptr_type = const node_type*;
@@ -964,11 +1023,8 @@ public:
   using difference_type = std::ptrdiff_t;
   using hasher = Hash;
   using key_equal = KeyEqual;
-  using allocator_type = Allocator;
   using reference = value_type&;
   using const_reference = const value_type&;
-  using pointer = std::allocator_traits<Allocator>::pointer;
-  using const_pointer = std::allocator_traits<Allocator>::const_pointer;
   using iterator = typename detail::Iterator<Ops, false>;
   using const_iterator = typename detail::Iterator<Ops, true>;
   static constexpr bool is_thread_safe = IsThreadSafe;
@@ -984,10 +1040,6 @@ public:
   PersistentSet(const PersistentSet& other) { *this = other; }
   PersistentSet(PersistentSet&& other) noexcept { swap(*this, other); }
   ~PersistentSet() { Ops::dec_ref(root_); }
-  //@}
-
-  //@{
-  // allocator_type get_allocator() const noexcept;
   //@}
 
   //@{ Assignment
@@ -1045,34 +1097,38 @@ public:
       insert_(std::move(item));
   }
 
+  template <class... Args> bool emplace(Args&&... args) {
+    return insert(value_type{std::forward<Args>(args)...});
+  }
+
   size_type erase(const key_type& key) { return erase_(key); }
 
-  // emplace()...;
-  // emplace_hint()...;
-  // erase()...;
   void swap(PersistentSet& other) noexcept { // Should not be able
     std::swap(root_, other.root_);
     std::swap(size_, other.size_);
   }
+
+  std::optional<value_type> extract(const key_type& key) {
+    auto result = find(key);
+    erase(key);
+    return result;
+  }
   //@}
 
   //@{ Lookup
-  // std::size_t count() const;
-  // find();
-  // contains();
-  // equal_range();
-  //@}
-
-  //@{ Compatibility
-  // rehash();
-  // reserve();
-  // load_factor();
-  // max_load_factor();
+  std::size_t count(const key_type& key) const { return contains(key); }
+  std::optional<value_type> find(const key_type& key) const {
+    auto* ptr = Ops::find(root_, key);
+    if (ptr != nullptr)
+      return {*ptr};
+    return {};
+  }
+  bool contains(const key_type& key) const { return Ops::find(root_, key) != nullptr; }
   //@}
 
   //@{ Observers
-  // hash_function
-  // key_eq
+  hasher hash_function() const { return hasher{}; }
+  key_equal key_eq() const { return key_equal{}; }
   //@}
 
   //@{ Friends
@@ -1084,74 +1140,26 @@ public:
     return !(lhs == rhs);
   }
 
-  // std::erase_if
-
   friend void swap(PersistentSet& lhs, PersistentSet& rhs) noexcept { lhs.swap(rhs); }
+
+  template <typename Predicate> friend size_type erase_if(PersistentSet& set, Predicate predicate) {
+    auto copy = set;
+    std::size_t counter = 0;
+    for (const auto& item : copy) {
+      if (predicate(item)) {
+        set.erase(item);
+        ++counter;
+      }
+    }
+    return counter;
+  }
   //@}
 
 private:
   node_ptr_type get_root_() { return root_; }
 
-  static size_t calculate_hash(const value_type& value) { return Ops::calculate_hash(value); }
-
-  static bool calculate_equals(const value_type& lhs, const value_type& rhs) {
-    return Ops::calculate_equals(lhs, rhs);
-  }
-
-  // static uint32_t get_index_in_leaf(const value_type& value, node_ptr_type leaf) {
-  //   if (leaf != nullptr) {
-  //     assert(Ops::type(leaf) == NodeType::Leaf);
-  //     auto* start = Ops::Leaf::ptr_at(leaf, 0);
-  //     for (auto* iterator = start; iterator != start + Ops::Leaf::size(leaf); ++iterator) {
-  //       assert(calculate_hash(*start) == calculate_hash(*iterator));
-  //       if (calculate_equals(value, *iterator))
-  //         return static_cast<uint32_t>(iterator - start);
-  //     }
-  //   }
-  //   return detail::NotAnIndex;
-  // }
-
-  template <typename Value> static node_ptr_type do_insert_(node_ptr_type root, Value&& value) {
-    if (root == nullptr) { // inserting into an empty tree: trivial case
-      return Ops::Leaf::make(std::forward<Value>(value));
-    }
-
-    // TO ADD:
-    //  1. If there's no leaf node at the end, then
-    //     (a) rewrite the branch
-    //     (b) insert the new leaf into the tail of the rewrite
-    //  2. If there is an existing leaf
-    //     (a) if:   eq, then insert as failed
-    //     (b) else: rewrite the branch
-    //     (c)       create a new path to discriminate between the existing and new leaf
-    //     (d)       join the two paths together
-    //  Finally: update the root
-    const auto hash = calculate_hash(value);
-    const auto path = Ops::make_path(root, hash);
-    node_ptr_type new_root = nullptr;
-
-    if (path.leaf_end == nullptr) {
-      auto new_leaf = Ops::Leaf::make(std::forward<Value>(value));
-      new_root = Ops::rewrite_branch_path(path, hash, new_leaf, new_leaf);
-
-    } else if (Ops::get_index_in_leaf(value, path.leaf_end) != detail::NotAnIndex) {
-      // (2.a) Duplicate!
-      new_root = root;
-
-    } else {
-      auto [new_branch, leaf_end] =
-          Ops::branch_to_leaves(hash,                        // Hash of the value
-                                path.size,                   // The path starts here
-                                path.leaf_end,               // Includes this node
-                                std::forward<Value>(value)); // Must include this new value
-      new_root = Ops::rewrite_branch_path(path, hash, new_branch, leaf_end);
-    }
-
-    return new_root;
-  }
-
   template <typename Value> bool insert_(Value&& value) {
-    node_ptr_type new_root = do_insert_(root_, std::forward<Value>(value));
+    node_ptr_type new_root = Ops::do_insert(root_, std::forward<Value>(value));
     const bool success = (new_root != root_);
 
     if (success) {
@@ -1171,7 +1179,6 @@ private:
   }
 
   size_type erase_(const key_type& key) {
-
     node_ptr_type new_root = Ops::erase(root_, key);
     const bool success = (new_root != root_);
     if (success) {

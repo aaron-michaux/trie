@@ -274,16 +274,21 @@ void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
 
   {
     std::size_t counter = 0;
-    auto ii = set.end();
-    while (true) {
-      if (ii == set.begin())
-        break;
+    for (auto ii = set.end(); ii != set.begin();) {
       --ii;
       auto value = (*ii).value();
       CATCH_REQUIRE(is_value((*ii).value()));
       ++counter;
     }
     CATCH_REQUIRE(counter == values.size());
+  }
+
+  {
+    for (auto ii = set.cbegin(); ii != set.cend(); ++ii) {
+      CATCH_REQUIRE(set.count(*ii) == 1);
+      CATCH_REQUIRE(*set.find(*ii) == *ii);
+      CATCH_REQUIRE(set.contains(*ii));
+    }
   }
 }
 
@@ -392,8 +397,8 @@ template <typename T> void test_node_size() {
 }
 
 template <typename T> void test_node_configuration() {
-  test_node_size<detail::NodeOps<T, std::hash<T>, std::equal_to<T>, std::allocator<T>, true>>();
-  test_node_size<detail::NodeOps<T, std::hash<T>, std::equal_to<T>, std::allocator<T>, false>>();
+  test_node_size<detail::NodeOps<T, std::hash<T>, std::equal_to<T>, true>>();
+  test_node_size<detail::NodeOps<T, std::hash<T>, std::equal_to<T>, false>>();
 }
 
 CATCH_TEST_CASE("node_configuration", "[node_configuration]") {
@@ -440,8 +445,7 @@ CATCH_TEST_CASE("trie_construct_destruct", "[trie_construct_destruct]") {
 
 CATCH_TEST_CASE("trie_ops_safe_destroy", "[trie_ops_safe_destroy]") {
   using Ops = detail::NodeOps<TracedItemSetType::value_type, TracedItemSetType::hasher,
-                              TracedItemSetType::key_equal, TracedItemSetType::allocator_type,
-                              TracedItemSetType::is_thread_safe>;
+                              TracedItemSetType::key_equal, TracedItemSetType::is_thread_safe>;
   Ops::destroy(nullptr); // should not crash
 }
 
@@ -454,8 +458,7 @@ template <typename SetType> void trie_ops_test() {
     using ItemType = typename SetType::value_type;
     // using NodeType = detail::NodeType;
     using Ops = detail::NodeOps<typename SetType::value_type, typename SetType::hasher,
-                                typename SetType::key_equal, typename SetType::allocator_type,
-                                SetType::is_thread_safe>;
+                                typename SetType::key_equal, SetType::is_thread_safe>;
 
     // Inserting the following sequence, to test code paths, hash is 32 bits
     // value =   1,         hash = 00|00-000|0 0000-|0000 0|000-00|00 000|0-0001
@@ -585,7 +588,7 @@ template <typename SetType> void trie_ops_test() {
       }
     }
 
-    if (false) { // Attempt to remove 'non-element'; graph unchanged
+    { // Attempt to remove 'non-element'; graph unchanged
       bool was_erased = set.erase(ItemType{counter, 0xff112233u});
       CATCH_REQUIRE(was_erased == false);
       CATCH_REQUIRE(set.size() == pos);
@@ -604,10 +607,28 @@ template <typename SetType> void trie_ops_test() {
           check_trie_invariants<Ops>(root, temp_set.size());
         }
       }
+      { // Erase if
+        auto predicate = [](const ItemType& item) { return item.value() % 2 == 0; };
+        auto temp_set = set;
+        const auto delete_count = erase_if(temp_set, predicate);
+        auto counter = 0u;
+        for (const auto& item : set) {
+          if (predicate(item)) {
+            CATCH_REQUIRE(!temp_set.contains(item));
+            counter++;
+          } else {
+            CATCH_REQUIRE(temp_set.contains(item));
+          }
+        }
+        assert(counter == delete_count);
+      }
       assert(pos > 0);
       const auto value = values[--pos];
-      bool was_erased = set.erase(ItemType{counter, value});
+      auto item = ItemType{counter, value};
+      CATCH_REQUIRE(set.contains(item));
+      bool was_erased = set.erase(item);
       CATCH_REQUIRE(was_erased == true);
+      CATCH_REQUIRE(!set.contains(item));
       auto root = private_hack::get_root(set);
       dot_graph<Ops>(fmt::format("/tmp/{}.dot", test_number++).c_str(), root);
       check_trie_invariants<Ops>(root, set.size());

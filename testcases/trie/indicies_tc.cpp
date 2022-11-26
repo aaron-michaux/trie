@@ -87,9 +87,9 @@ public:
 };
 
 // Set types used in testing need to be declared here to use the "private hack"
-using TracedItemSetType = PersistentSet<TracedItem, TracedItem::Hasher>;
-using MoveTracedItemSetType = PersistentSet<MoveTracedItem, MoveTracedItem::Hasher>;
-using TrivialTracedItemSetType = PersistentSet<TrivialTracedItem, TrivialTracedItem::Hasher>;
+using TracedItemSetType = persistent_set<TracedItem, TracedItem::Hasher>;
+using MoveTracedItemSetType = persistent_set<MoveTracedItem, MoveTracedItem::Hasher>;
+using TrivialTracedItemSetType = persistent_set<TrivialTracedItem, TrivialTracedItem::Hasher>;
 
 namespace private_hack {
 template <typename Tag> struct result {
@@ -444,7 +444,7 @@ CATCH_TEST_CASE("trie_construct_destruct", "[trie_construct_destruct]") {
 }
 
 CATCH_TEST_CASE("trie_ops_safe_destroy", "[trie_ops_safe_destroy]") {
-  using Ops = detail::NodeOps<TracedItemSetType::value_type, TracedItemSetType::hasher,
+  using Ops = detail::NodeOps<TracedItemSetType::item_type, TracedItemSetType::hasher,
                               TracedItemSetType::key_equal, TracedItemSetType::is_thread_safe>;
   Ops::destroy(nullptr); // should not crash
 }
@@ -455,9 +455,9 @@ template <typename SetType> void trie_ops_test() {
 
   {
     SetType set;
-    using ItemType = typename SetType::value_type;
+    using ItemType = typename SetType::item_type;
     // using NodeType = detail::NodeType;
-    using Ops = detail::NodeOps<typename SetType::value_type, typename SetType::hasher,
+    using Ops = detail::NodeOps<typename SetType::item_type, typename SetType::hasher,
                                 typename SetType::key_equal, SetType::is_thread_safe>;
 
     // Inserting the following sequence, to test code paths, hash is 32 bits

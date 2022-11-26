@@ -388,7 +388,7 @@ template <typename T> void test_node_size() {
     CATCH_REQUIRE(T::Leaf::offset() >= sizeof(typename T::node_type));
     auto address_0 = reinterpret_cast<uintptr_t>(T::Leaf::ptr_at(node, 0));
     CATCH_REQUIRE(address_0 >= reinterpret_cast<uintptr_t>(node) + sizeof(typename T::node_type));
-    CATCH_REQUIRE(address_0 % alignof(typename T::Leaf::value_type) == 0);
+    CATCH_REQUIRE(address_0 % alignof(typename T::Leaf::item_type) == 0);
     CATCH_REQUIRE(T::ref_count(node) == 1);
     node->dec_ref();
     CATCH_REQUIRE(T::ref_count(node) == 0);

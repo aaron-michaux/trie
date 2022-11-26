@@ -18,28 +18,6 @@
 
 namespace niggly::trie {
 
-/**
- * @TODO
- * - hash functions for integers (no penalty for monotonically increasing inserts)
- * - bulk insert... no reference counting
- * - performance: insert, delete, lookup,
- */
-
-/**
- * Node { size, ref-count, is-leaf? | <storage> }
- *        everything at a left-node has the same hash
- *
- * Find (level): if branch node, then lookup branch and go
- *               if leaf node, then ibterate to find eq= match
- *
- * Insert (level): branch: lookup and go, or insert leaf if nullptr
- *                 leaf: hash= and insert, or make branch with two leaves
- *
- * Delete (level): could end up with an empty leaf node
- *
- * Iterate (level): easy
- */
-
 namespace detail {
 
 constexpr std::size_t MaxTrieDepth{13}; // maximum branch nodes... leaf nodes don't count here
@@ -166,21 +144,20 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   using node_type = NodeData<IsThreadSafe>;
   using node_ptr_type = node_type*;
   using node_const_ptr_type = const node_type*;
-  using key_type = T;
-  using value_type = T;
+  using item_type = T;
   using hash_type = std::size_t;
   using node_size_type = typename node_type::node_size_type;
   using ref_count_type = typename node_type::ref_count_type;
 
   static constexpr NodeType DefaultType{IsSparseIndex ? NodeType::Branch : NodeType::Leaf};
-  static constexpr std::size_t LogicalSize{calculate_logical_size<value_type>()};
-  static constexpr std::size_t AlignOf{std::max(alignof(value_type), alignof(node_type))};
+  static constexpr std::size_t LogicalSize{calculate_logical_size<item_type>()};
+  static constexpr std::size_t AlignOf{std::max(alignof(item_type), alignof(node_type))};
   static constexpr std::size_t MinStorageSize{std::max(sizeof(node_type), AlignOf)};
   static constexpr node_size_type MaxSize{(1 << (8 * sizeof(node_size_type) - 1)) - 1};
 
   // The start of a compact array (BranchNode), or array of values (LeafNode)
   static constexpr std::size_t offset() {
-    if (alignof(value_type) <= sizeof(node_type)) {
+    if (alignof(item_type) <= sizeof(node_type)) {
       return sizeof(node_type); // align=[1, 2, 4, 8] => data starts at node_type edge
     }
     return LogicalSize;
@@ -209,7 +186,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     }
   }
 
-  static value_type* ptr_at(node_const_ptr_type node, node_size_type index) {
+  static item_type* ptr_at(node_const_ptr_type node, node_size_type index) {
     if constexpr (IsSparseIndex) {
       assert(index < 32);
       return dense_ptr_at(node, to_dense_index(index, node->payload_));
@@ -218,14 +195,14 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     }
   }
 
-  static value_type* dense_ptr_at(node_const_ptr_type node, node_size_type index) {
+  static item_type* dense_ptr_at(node_const_ptr_type node, node_size_type index) {
     auto ptr_idx = reinterpret_cast<uintptr_t>(node) + offset_at(index);
-    assert(ptr_idx % alignof(value_type) == 0); // never unaligned access
-    return reinterpret_cast<value_type*>(ptr_idx);
+    assert(ptr_idx % alignof(item_type) == 0); // never unaligned access
+    return reinterpret_cast<item_type*>(ptr_idx);
   }
 
-  static value_type* begin(node_const_ptr_type node) { return ptr_at(node, 0); }
-  static value_type* end(node_const_ptr_type node) { return ptr_at(node, 0) + size(node); }
+  static item_type* begin(node_const_ptr_type node) { return ptr_at(node, 0); }
+  static item_type* end(node_const_ptr_type node) { return ptr_at(node, 0) + size(node); }
   //@}
 
   //@{ Utility
@@ -235,25 +212,25 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     return ptr;
   }
 
-  static void copy_one(const value_type& src, value_type* dst) {
+  static void copy_one(const item_type& src, item_type* dst) {
     assert(!IsSparseIndex); // Not useful for sparse indices
-    if constexpr (std::is_trivial<value_type>::value) {
-      std::memcpy(dst, &src, sizeof(value_type));
+    if constexpr (std::is_trivial<item_type>::value) {
+      std::memcpy(dst, &src, sizeof(item_type));
     } else {
-      static_assert(std::is_copy_constructible<value_type>::value);
-      new (dst) value_type{src};
+      static_assert(std::is_copy_constructible<item_type>::value);
+      new (dst) item_type{src};
     }
   }
 
-  static void initialize_one(const value_type& src, value_type* dst) { copy_one(src, dst); }
+  static void initialize_one(const item_type& src, item_type* dst) { copy_one(src, dst); }
 
-  static void initialize_one(value_type&& src, value_type* dst) {
+  static void initialize_one(item_type&& src, item_type* dst) {
     assert(!IsSparseIndex); // Not useful for sparse indices
-    if constexpr (std::is_move_constructible<value_type>::value) {
-      new (dst) value_type{std::move(src)};
-    } else if constexpr (std::is_default_constructible<value_type>::value &&
-                         std::is_move_assignable<value_type>::value) {
-      new (dst) value_type{};
+    if constexpr (std::is_move_constructible<item_type>::value) {
+      new (dst) item_type{std::move(src)};
+    } else if constexpr (std::is_default_constructible<item_type>::value &&
+                         std::is_move_assignable<item_type>::value) {
+      new (dst) item_type{};
       *dst = std::move(src);
     } else {
       copy_one(src, dst);
@@ -263,10 +240,10 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   static void copy_payload_to(node_const_ptr_type src, node_ptr_type dst) {
     assert(!IsSparseIndex); // Not useful for sparse indices
     assert(src != nullptr);
-    if constexpr (std::is_trivially_copyable<value_type>::value) {
+    if constexpr (std::is_trivially_copyable<item_type>::value) {
       std::memcpy(ptr_at(dst, 0), ptr_at(src, 0), size(src) * LogicalSize);
     } else {
-      static_assert(std::is_copy_constructible<value_type>::value);
+      static_assert(std::is_copy_constructible<item_type>::value);
       for (auto i = 0u; i < size(src); ++i) {
         copy_one(*ptr_at(src, i), ptr_at(dst, i));
       }
@@ -277,14 +254,14 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   //@{ Factory/Destruct
   static node_ptr_type make_empty() { return make_uninitialized(0, 0); }
 
-  static node_ptr_type make(const value_type& value) {
+  static node_ptr_type make(const item_type& value) {
     assert(!IsSparseIndex); // Have to supply an index for such
     auto* ptr = make_uninitialized(1, 1);
     initialize_one(value, ptr_at(ptr, 0));
     return ptr;
   }
 
-  static node_ptr_type make(value_type&& value) {
+  static node_ptr_type make(item_type&& value) {
     assert(!IsSparseIndex); // Have to supply an index for such
     auto* ptr = make_uninitialized(1, 1);
     initialize_one(std::move(value), ptr_at(ptr, 0));
@@ -302,9 +279,9 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     node_ptr_type ptr = make_uninitialized(sz, node->payload_);
 
     // Copy the pointers
-    value_type* dst = dense_ptr_at(ptr, 0);
-    const value_type* src = dense_ptr_at(node, 0);
-    std::memcpy(dst, src, sz * sizeof(value_type));
+    item_type* dst = dense_ptr_at(ptr, 0);
+    const item_type* src = dense_ptr_at(node, 0);
+    std::memcpy(dst, src, sz * sizeof(item_type));
 
     // Must bump up all references
     for (auto i = 0u; i < sz; ++i) {
@@ -332,8 +309,8 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
         make_uninitialized(sz - 1, node->payload_ & ~(1u << sparse_index_to_remove));
 
     // Copy the pointers
-    value_type* dst = dense_ptr_at(ptr, 0);
-    const value_type* src = dense_ptr_at(node, 0);
+    item_type* dst = dense_ptr_at(ptr, 0);
+    const item_type* src = dense_ptr_at(node, 0);
 
     // Must bump up all references
     auto write_pos = 0u;
@@ -371,7 +348,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   /**
    * Creates a new branch node, with `value` inserted at `index`
    */
-  static node_ptr_type insert_into_branch_node(node_const_ptr_type src, value_type value,
+  static node_ptr_type insert_into_branch_node(node_const_ptr_type src, item_type value,
                                                uint32_t index) {
     assert(IsSparseIndex);
     assert(src->type() == NodeType::Branch);
@@ -425,8 +402,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
 template <typename T, typename Hash = std::hash<T>, typename KeyEqual = std::equal_to<T>,
           bool IsThreadSafe = true>
 struct NodeOps {
-  using key_type = T;
-  using value_type = T;
+  using item_type = T;
   using node_type = NodeData<IsThreadSafe>;
   using node_ptr_type = node_type*;
   using node_const_ptr_type = const node_type*;
@@ -666,17 +642,17 @@ struct NodeOps {
     return {branch, new_leaf};
   }
 
-  static size_t calculate_hash(const value_type& value) {
+  static size_t calculate_hash(const item_type& value) {
     hasher hash_fun;
     return hash_fun(value);
   }
 
-  static bool calculate_equals(const value_type& lhs, const value_type& rhs) {
+  static bool calculate_equals(const item_type& lhs, const item_type& rhs) {
     key_equal fun;
     return fun(lhs, rhs);
   }
 
-  static uint32_t get_index_in_leaf(const value_type& value, node_const_ptr_type leaf) {
+  static uint32_t get_index_in_leaf(const item_type& value, node_const_ptr_type leaf) {
     if (leaf != nullptr) {
       assert(type(leaf) == NodeType::Leaf);
       auto* start = Leaf::ptr_at(leaf, 0);
@@ -689,13 +665,29 @@ struct NodeOps {
     return detail::NotAnIndex;
   }
 
-  static node_ptr_type erase(node_ptr_type root, const key_type& key) {
+  template <typename Predicate>
+  static uint32_t get_index_in_leaf_with_predicate(Predicate&& predicate,
+                                                   node_const_ptr_type leaf) {
+    if (leaf != nullptr) {
+      assert(type(leaf) == NodeType::Leaf);
+      auto* start = Leaf::ptr_at(leaf, 0);
+      for (auto* iterator = start; iterator != start + Leaf::size(leaf); ++iterator) {
+        assert(calculate_hash(*start) == calculate_hash(*iterator));
+        if (predicate(*iterator))
+          return static_cast<uint32_t>(iterator - start);
+      }
+    }
+    return detail::NotAnIndex;
+  }
+
+  template <typename Predicate>
+  static node_ptr_type erase(node_ptr_type root, const std::size_t hash, Predicate&& predicate) {
     // 1. Find the node (if it's not found, return zero)
     // 2. Delete the leaf, and "roll up"
 
-    const auto hash = calculate_hash(key);
     const auto path = make_path(root, hash);
-    const auto leaf_index = get_index_in_leaf(key, path.leaf_end);
+    const auto leaf_index =
+        get_index_in_leaf_with_predicate(std::forward<Predicate>(predicate), path.leaf_end);
 
     auto other_sibling = [&](node_ptr_type node, uint32_t level) {
       // If a Branch node as two siblings, then this method
@@ -807,10 +799,16 @@ struct NodeOps {
     return new_root;
   }
 
-  static const value_type* find(node_const_ptr_type root, const key_type& key) {
+  static const item_type* find(node_const_ptr_type root, const item_type& key) {
+    return find_if(root, calculate_hash(key),
+                   [&key](const item_type& item) { return calculate_equals(key, item); });
+  }
+
+  template <typename Predicate>
+  static const item_type* find_if(node_const_ptr_type root, std::size_t hash,
+                                  Predicate&& predicate) {
     auto node = root;
     auto level = 0u;
-    const auto hash = calculate_hash(key);
     if (node != nullptr) {
       while (type(node) == NodeType::Branch) {
         const auto sparse_index = hash_chunk(hash, level++);
@@ -820,9 +818,12 @@ struct NodeOps {
           break;
       }
       if (type(node) == NodeType::Leaf) {
-        const auto index = get_index_in_leaf(key, node);
-        if (index != NotAnIndex)
-          return Leaf::ptr_at(node, index);
+        auto* start = Leaf::ptr_at(node, 0);
+        auto* finish = start + Leaf::size(node);
+        for (auto iterator = start; iterator != finish; ++iterator) {
+          if (predicate(*iterator))
+            return iterator;
+        }
       }
     }
     return nullptr;
@@ -833,9 +834,9 @@ struct NodeOps {
 template <typename NodeOps, bool is_const_reference> class Iterator {
 public:
   using iterator_category = std::bidirectional_iterator_tag;
-  using value_type = typename NodeOps::value_type;
-  using reference_type = std::conditional<is_const_reference, const value_type&, value_type&>::type;
-  using pointer_type = std::conditional<is_const_reference, const value_type*, value_type*>::type;
+  using item_type = typename NodeOps::item_type;
+  using reference_type = std::conditional<is_const_reference, const item_type&, item_type&>::type;
+  using pointer_type = std::conditional<is_const_reference, const item_type*, item_type*>::type;
   using node_type = typename NodeOps::node_type;
   using node_ptr_type = node_type*;
   using node_const_ptr_type = const node_type*;
@@ -1183,7 +1184,15 @@ private:
   }
 
   size_type erase_(const item_type& key) {
-    node_ptr_type new_root = Ops::erase(root_, key);
+    hasher hash_func;
+    return erase_(hash_func(key), [&key](const item_type& item) {
+      key_equal f;
+      return f(key, item);
+    });
+  }
+
+  template <typename Predicate> size_type erase_(std::size_t hash, Predicate&& predicate) {
+    node_ptr_type new_root = Ops::erase(root_, hash, std::forward<Predicate>(predicate));
     const bool success = (new_root != root_);
     if (success) {
       Ops::dec_ref(root_);
@@ -1212,9 +1221,9 @@ private:
   };
 
   struct ItemEquals {
-    bool operator()(const item_type_& item) const {
+    bool operator()(const item_type_& lhs, const item_type_& rhs) const {
       KeyEqual key_eq;
-      return key_eq(item.first);
+      return key_eq(lhs.first, rhs.first);
     }
   };
 
@@ -1232,6 +1241,15 @@ public:
 
 private:
   using set_type = persistent_set<item_type, ItemHasher, ItemEquals, IsThreadSafe>;
+
+  struct ItemPredicate {
+    const key_type& key_;
+    ItemPredicate(const key_type& key) : key_(key) {}
+    bool operator()(const item_type_& item) const {
+      KeyEqual key_eq;
+      return key_eq(key_, item.first);
+    }
+  };
 
 public:
   using iterator = typename set_type::iterator;
@@ -1282,12 +1300,22 @@ public:
   }
   void swap(persistent_map& other) noexcept { set_.swap(other.set_); }
 
-  // size_type erase(const key_type& key) { return set_.erase_(key); }
+  size_type erase(const key_type& key) {
+    hasher hash_func;
+    return set_.erase_(hash_func(key), [&key](const item_type& item) {
+      key_equal f;
+      return f(key, item.first);
+    });
+  }
   // template<class...Args> bool try_emplace(const key_type& k, Args&&... args);
   // template <class M> bool insert_or_assign(const key_type& k, M&& obj);
   // template <class M> bool insert_or_assign(key_type&& k, M&& obj);
-  // std::optional<item_type> extract(const key_type& key)
-  // std::optional<item_type> find(const key_type& key) const
+  std::optional<item_type> extract(const key_type& key) {
+    auto result = find(key);
+    if (result.has_value())
+      erase(key);
+    return result;
+  }
 
   template <typename Predicate> persistent_map erase_if(Predicate predicate) {
     persistent_map new_map;
@@ -1298,9 +1326,14 @@ public:
   //@}
 
   //@{ Lookup
-  // std::size_t count(const key_type& key) const { return contains(key); }
-  // std::optional<item_type> find(const key_type& key) const
-  // bool contains(const key_type& key) const
+  std::size_t count(const key_type& key) const { return contains(key); }
+  std::optional<item_type> find(const key_type& key) const {
+    auto* ptr = find_(key);
+    if (ptr != nullptr)
+      return {*ptr};
+    return {};
+  }
+  bool contains(const key_type& key) const { return find_(key) != nullptr; }
   //@}
 
   //@{ Observers
@@ -1325,6 +1358,15 @@ public:
                     [&predicate](const item_type& item) { return predicate(item.first); });
   }
   //@}
+
+private:
+  const item_type* find_(const key_type& key) const {
+    hasher hash_func;
+    return set_type::Ops::find_if(set_.root_, hash_func(key), [&key](const item_type& item) {
+      key_equal f;
+      return f(key, item.first);
+    });
+  }
 };
 
 } // namespace niggly::trie

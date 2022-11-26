@@ -463,9 +463,9 @@ template <typename SetType> void trie_ops_test() {
       CATCH_REQUIRE(set.size() < set.max_size());
       CATCH_REQUIRE((skip_counter_test || counter == new_size));
       auto root = private_hack::get_root(set);
+      dot_graph<Ops>(fmt::format("/tmp/{}.dot", test_number++).c_str(), root);
       check_trie_invariants<Ops>(root, set.size());
       check_trie_iterators(set, std::begin(values), std::begin(values) + new_size);
-      dot_graph<Ops>(fmt::format("/tmp/{}.dot", test_number++).c_str(), root);
     };
 
     { // Insert into empty
@@ -564,12 +564,35 @@ template <typename SetType> void trie_ops_test() {
       }
     }
 
-    { // Attempt to remove 'non-element'; graph unchanged
+    if (false) { // Attempt to remove 'non-element'; graph unchanged
       bool was_erased = set.erase(ItemType{counter, 0xff112233u});
       CATCH_REQUIRE(was_erased == false);
       CATCH_REQUIRE(set.size() == pos);
       auto root = private_hack::get_root(set);
       check_trie_invariants<Ops>(root, set.size());
+    }
+
+    while (set.size() > 0) {
+      std::cout << fmt::format("\n\n--- DELETE FROM SET SIZE {} ---\n", set.size());
+      if (false) {
+        for (const auto& item : set) {
+          auto temp_set = set;
+          bool was_erased = temp_set.erase(item);
+          CATCH_REQUIRE(was_erased == true);
+          CATCH_REQUIRE(temp_set.size() + 1 == set.size());
+          auto root = private_hack::get_root(temp_set);
+          dot_graph<Ops>(fmt::format("/tmp/{}.dot", test_number++).c_str(), root);
+          check_trie_invariants<Ops>(root, temp_set.size());
+        }
+      }
+      assert(pos > 0);
+      const auto value = values[--pos];
+      bool was_erased = set.erase(ItemType{counter, value});
+      CATCH_REQUIRE(was_erased == true);
+      auto root = private_hack::get_root(set);
+      dot_graph<Ops>(fmt::format("/tmp/{}.dot", test_number++).c_str(), root);
+      check_trie_invariants<Ops>(root, set.size());
+      check_trie_iterators(set, std::begin(values), std::begin(values) + set.size());
     }
   }
 

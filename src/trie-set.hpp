@@ -164,6 +164,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
 
   using node_type = NodeData<IsThreadSafe>;
   using node_ptr_type = node_type*;
+  using node_const_ptr_type = const node_type*;
   using key_type = T;
   using value_type = T;
   using hash_type = std::size_t;
@@ -192,14 +193,14 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     return (size == 0) ? MinStorageSize : offset() + LogicalSize * size;
   }
 
-  static NodeType type(const node_type* node) { return node->type(); }
+  static NodeType type(node_const_ptr_type node) { return node->type(); }
 
-  static std::size_t size(const node_type* node) {
+  static std::size_t size(node_const_ptr_type node) {
     return IsSparseIndex ? popcount(node->payload_) : node->payload_;
   }
 
   //@{ Member access
-  static bool is_valid_index(const node_type* node, node_size_type index) {
+  static bool is_valid_index(node_const_ptr_type node, node_size_type index) {
     if constexpr (IsSparseIndex) {
       return ::niggly::trie::detail::is_valid_index(index, node->payload_);
     } else {
@@ -207,7 +208,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     }
   }
 
-  static value_type* ptr_at(const node_type* node, node_size_type index) {
+  static value_type* ptr_at(node_const_ptr_type node, node_size_type index) {
     if constexpr (IsSparseIndex) {
       assert(index < 32);
       return dense_ptr_at(node, to_dense_index(index, node->payload_));
@@ -216,19 +217,19 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     }
   }
 
-  static value_type* dense_ptr_at(const node_type* node, node_size_type index) {
+  static value_type* dense_ptr_at(node_const_ptr_type node, node_size_type index) {
     auto ptr_idx = reinterpret_cast<uintptr_t>(node) + offset_at(index);
     assert(ptr_idx % alignof(value_type) == 0); // never unaligned access
     return reinterpret_cast<value_type*>(ptr_idx);
   }
 
-  static value_type* begin(const node_type* node) { return ptr_at(node, 0); }
-  static value_type* end(const node_type* node) { return ptr_at(node, 0) + size(node); }
+  static value_type* begin(node_const_ptr_type node) { return ptr_at(node, 0); }
+  static value_type* end(node_const_ptr_type node) { return ptr_at(node, 0) + size(node); }
   //@}
 
   //@{ Utility
-  static node_type* make_uninitialized(node_size_type size, node_size_type payload) {
-    auto ptr = static_cast<node_type*>(std::aligned_alloc(AlignOf, storage_size(size)));
+  static node_ptr_type make_uninitialized(node_size_type size, node_size_type payload) {
+    auto ptr = static_cast<node_ptr_type>(std::aligned_alloc(AlignOf, storage_size(size)));
     new (ptr) node_type{DefaultType, payload};
     return ptr;
   }
@@ -258,7 +259,7 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     }
   }
 
-  static void copy_payload_to(const node_type* src, node_type* dst) {
+  static void copy_payload_to(node_const_ptr_type src, node_ptr_type dst) {
     assert(!IsSparseIndex); // Not useful for sparse indices
     assert(src != nullptr);
     if constexpr (std::is_trivially_copyable<value_type>::value) {
@@ -273,16 +274,16 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   //@}
 
   //@{ Factory/Destruct
-  static node_type* make_empty() { return make_uninitialized(0, 0); }
+  static node_ptr_type make_empty() { return make_uninitialized(0, 0); }
 
-  static node_type* make(const value_type& value) {
+  static node_ptr_type make(const value_type& value) {
     assert(!IsSparseIndex); // Have to supply an index for such
     auto* ptr = make_uninitialized(1, 1);
     initialize_one(value, ptr_at(ptr, 0));
     return ptr;
   }
 
-  static node_type* make(value_type&& value) {
+  static node_ptr_type make(value_type&& value) {
     assert(!IsSparseIndex); // Have to supply an index for such
     auto* ptr = make_uninitialized(1, 1);
     initialize_one(std::move(value), ptr_at(ptr, 0));
@@ -293,11 +294,11 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
    * Duplicate a Branch node, copying the values, perhaps skipping an index that is being
    * overwritten
    */
-  static node_type* duplicate(node_type* node, uint32_t dense_index_to_skip) {
+  static node_ptr_type duplicate(node_ptr_type node, uint32_t dense_index_to_skip) {
     assert(IsSparseIndex);                    // only makes sense for sparse-index
     assert(node->type() == NodeType::Branch); // and this too
     const auto sz = size(node);
-    node_type* ptr = make_uninitialized(sz, node->payload_);
+    node_ptr_type ptr = make_uninitialized(sz, node->payload_);
 
     // Copy the pointers
     value_type* dst = dense_ptr_at(ptr, 0);
@@ -316,7 +317,8 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   /**
    *
    */
-  static node_type* remove_from_branch_node(node_type* node, uint32_t sparse_index_to_remove) {
+  static node_ptr_type remove_from_branch_node(node_ptr_type node,
+                                               uint32_t sparse_index_to_remove) {
     assert(IsSparseIndex);                    // only makes sense for sparse-index
     assert(node->type() == NodeType::Branch); // and this too
     assert(size(node) > 1);                   // otherwise the branch node would become empty
@@ -325,7 +327,8 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
     const auto sz = size(node);
     const auto dense_index = to_dense_index(sparse_index_to_remove, node->payload_);
 
-    node_type* ptr = make_uninitialized(sz - 1, node->payload_ & ~(1u << sparse_index_to_remove));
+    node_ptr_type ptr =
+        make_uninitialized(sz - 1, node->payload_ & ~(1u << sparse_index_to_remove));
 
     // Copy the pointers
     value_type* dst = dense_ptr_at(ptr, 0);
@@ -345,17 +348,17 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   /**
    * Duplicates a leaf node, optionally omitting the value at `index_to_skip`
    */
-  static node_type* duplicate_leaf(const node_type* node, uint32_t index_to_skip) {
+  static node_ptr_type duplicate_leaf(node_const_ptr_type node, uint32_t index_to_skip) {
     assert(!IsSparseIndex);                 // only makes sense for leaf nodes
     assert(node->type() == NodeType::Leaf); // and this too
     const auto sz = size(node);
-    node_type* new_node = nullptr;
+    node_ptr_type new_node = nullptr;
     if (index_to_skip < sz) {
-      make_uninitialized(sz - 1, sz - 1);
+      new_node = make_uninitialized(sz - 1, sz - 1);
       uint32_t write_index = 0;
       for (auto index = 0u; index != sz; ++index) {
         if (index != index_to_skip)
-          copy_one(*ptr_at(node, index), ptr_at(node, write_index++));
+          copy_one(*ptr_at(node, index), ptr_at(new_node, write_index++));
       }
     } else {
       new_node = make_uninitialized(sz, sz);
@@ -367,8 +370,8 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   /**
    * Creates a new branch node, with `value` inserted at `index`
    */
-  static node_type* insert_into_branch_node(const node_type* src, value_type value,
-                                            uint32_t index) {
+  static node_ptr_type insert_into_branch_node(node_const_ptr_type src, value_type value,
+                                               uint32_t index) {
     assert(IsSparseIndex);
     assert(src->type() == NodeType::Branch);
     assert(index < 32);
@@ -404,7 +407,8 @@ template <typename T, bool IsThreadSafe = true, bool IsSparseIndex = false> stru
   /**
    * Creates a new leaf node, with values copied, and `value` at the end
    */
-  template <typename Value> static node_type* copy_append(const node_type* src, Value&& value) {
+  template <typename Value>
+  static node_ptr_type copy_append(node_const_ptr_type src, Value&& value) {
     assert(!IsSparseIndex);
     const auto sz = size(src);
     auto new_node = make_uninitialized(sz + 1, sz + 1);
@@ -424,21 +428,22 @@ struct NodeOps {
   using value_type = T;
   using node_type = NodeData<IsThreadSafe>;
   using node_ptr_type = node_type*;
+  using node_const_ptr_type = const node_type*;
   using hash_type = std::size_t;
   using node_size_type = typename node_type::node_size_type;
   using ref_count_type = typename node_type::ref_count_type;
   using hasher = Hash;
   using key_equal = KeyEqual;
 
-  using Branch = BaseNodeOps<node_type*, IsThreadSafe, true>;
+  using Branch = BaseNodeOps<node_ptr_type, IsThreadSafe, true>;
   using Leaf = BaseNodeOps<T, IsThreadSafe, false>;
 
   //@{ Factory/Destroy
-  static node_type* make_empty(NodeType type) {
+  static node_ptr_type make_empty(NodeType type) {
     return (type == NodeType::Branch) ? Branch::make_empty() : Leaf::make_empty();
   }
 
-  static void destroy(node_type* node_ptr) {
+  static void destroy(node_ptr_type node_ptr) {
     if (node_ptr == nullptr) {
       return;
     }
@@ -468,18 +473,18 @@ struct NodeOps {
   //@}
 
   //@{ Getters
-  static NodeType type(const node_type* node) { return node->type(); }
+  static NodeType type(node_const_ptr_type node) { return node->type(); }
 
-  static std::size_t size(const node_type* node) {
+  static std::size_t size(node_const_ptr_type node) {
     return (node->type() == NodeType::Branch) ? Branch::size(node) : Leaf::size(node);
   }
 
-  static bool is_valid_index(const node_type* node) {
+  static bool is_valid_index(node_const_ptr_type node) {
     return (node->type() == NodeType::Branch) ? Branch::is_valid_index(node)
                                               : Leaf::is_valid_index(node);
   }
 
-  static std::size_t hash(const node_type* node) {
+  static std::size_t hash(node_const_ptr_type node) {
     assert(node != nullptr);
     assert(node->type() == NodeType::Leaf);
     assert(Leaf::size(node) > 0);
@@ -489,31 +494,31 @@ struct NodeOps {
   //@}
 
   //@{ Reference counting
-  static void add_ref(const node_type* node) {
+  static void add_ref(node_const_ptr_type node) {
     if (node != nullptr)
       node->add_ref();
   }
-  static void dec_ref(const node_type* node) {
+  static void dec_ref(node_const_ptr_type node) {
     if (node != nullptr && node->dec_ref() == 0)
-      destroy(const_cast<node_type*>(node));
+      destroy(const_cast<node_ptr_type>(node));
   }
-  static ref_count_type ref_count(const node_type* node) {
+  static ref_count_type ref_count(node_const_ptr_type node) {
     return (node == nullptr) ? 0 : node->ref_count();
   }
   //@}
 
   //@{ Path
   struct TreePath {
-    std::array<node_type*, MaxTrieDepth> nodes; //!< the path is {Branch, Branch, Branch}
-    node_type* leaf_end = nullptr;              //!< set if the path ends in a leaf
-    uint32_t size = 0;                          //!< number of branch elements in path
-    void push(node_type* node) {
+    std::array<node_ptr_type, MaxTrieDepth> nodes; //!< the path is {Branch, Branch, Branch}
+    node_ptr_type leaf_end = nullptr;              //!< set if the path ends in a leaf
+    uint32_t size = 0;                             //!< number of branch elements in path
+    void push(node_ptr_type node) {
       assert(size + 1 < nodes.size());
       nodes[size++] = node;
     }
   };
 
-  static TreePath make_path(node_type* root, std::size_t hash) {
+  static TreePath make_path(node_ptr_type root, std::size_t hash) {
     TreePath path;
     auto node = root;
     while (node != nullptr && type(node) == NodeType::Branch) {
@@ -545,8 +550,8 @@ struct NodeOps {
    *
    * @return The new root of the tree
    */
-  static node_type* rewrite_branch_path(const TreePath& path, std::size_t hash, node_type* new_node,
-                                        node_type* leaf_end) {
+  static node_ptr_type rewrite_branch_path(const TreePath& path, std::size_t hash,
+                                           node_ptr_type new_node, node_ptr_type leaf_end) {
     // When editing the tree, we need to make a copy of all the branch nodes,
     // Returning the head+tail, i.e, the new root, and the new branch node at the tip
     if (path.size == 0)
@@ -555,7 +560,7 @@ struct NodeOps {
     // Working backwards, so start with the tail
     const uint32_t last_level = path.size - 1;
     auto last_index = hash_chunk(hash, last_level);
-    node_type* iterator = path.nodes[last_level];
+    node_ptr_type iterator = path.nodes[last_level];
     if (Branch::is_valid_index(iterator, last_index)) {
       const auto dense_index = to_dense_index(last_index, iterator->payload_);
       const auto old_leaf = *Branch::dense_ptr_at(iterator, dense_index);
@@ -574,8 +579,8 @@ struct NodeOps {
     return rewrite_and_attach(path, hash, last_level, iterator);
   }
 
-  static node_type* rewrite_and_attach(const TreePath& path, std::size_t hash, uint32_t level,
-                                       node_type* splice_node) {
+  static node_ptr_type rewrite_and_attach(const TreePath& path, std::size_t hash, uint32_t level,
+                                          node_ptr_type splice_node) {
     auto iterator = splice_node;
     for (auto i = level; i > 0; --i) {
       auto* node = path.nodes[i - 1];
@@ -604,8 +609,8 @@ struct NodeOps {
    * Returns {branch-head, new-leaf}
    */
   template <typename Value>
-  static std::pair<node_type*, node_type*>
-  branch_to_leaves(const std::size_t value_hash, uint32_t level, node_type* existing_leaf,
+  static std::pair<node_ptr_type, node_ptr_type>
+  branch_to_leaves(const std::size_t value_hash, uint32_t level, node_ptr_type existing_leaf,
                    Value&& value) {
     assert(type(existing_leaf) == NodeType::Leaf);
     assert(Leaf::size(existing_leaf) > 0);
@@ -622,11 +627,11 @@ struct NodeOps {
     assert(level < MaxTrieDepth); // otherwise the hashes would have to have been equal
 
     // Otherwise, make {branch, branch, branch, ...} until the indices diverge
-    node_type* branch = nullptr;
-    node_type* tail = nullptr;
+    node_ptr_type branch = nullptr;
+    node_ptr_type tail = nullptr;
     uint32_t last_index = 0u;
 
-    auto append_to_tail = [&](node_type* new_branch, uint32_t index) {
+    auto append_to_tail = [&](node_ptr_type new_branch, uint32_t index) {
       if (branch == nullptr) {
         branch = new_branch;                            // nothing to connect
       } else {                                          //
@@ -636,7 +641,7 @@ struct NodeOps {
       last_index = index;                               // store the index for next insert into tail
     };
 
-    node_type* new_leaf = nullptr;
+    node_ptr_type new_leaf = nullptr;
     for (auto i = level; new_leaf == nullptr; ++i) {
       assert(i < MaxTrieDepth); // otherwise there'd have to be a hash collission
       const auto index_lhs = hash_chunk(existing_hash, i);
@@ -683,96 +688,82 @@ struct NodeOps {
     return detail::NotAnIndex;
   }
 
-  static node_type* erase(node_type* root, const key_type& key) {
+  static node_ptr_type erase(node_ptr_type root, const key_type& key) {
     // 1. Find the node (if it's not found, return zero)
     // 2. Delete the leaf, and "roll up"
-
-    std::cout << fmt::format("ERASE {}\n", key.value());
 
     const auto hash = calculate_hash(key);
     const auto path = make_path(root, hash);
     const auto leaf_index = get_index_in_leaf(key, path.leaf_end);
 
-    auto rollup_path = [&](node_ptr_type new_leaf = nullptr) {
-      node_ptr_type new_root = nullptr;
-      auto level = path.size - 1;
-      if (new_leaf != nullptr) {
-        if (level > 0)
-          --level;
-        add_ref(new_leaf); // it is going to be referenced once more time
-      }
+    auto other_sibling = [&](node_ptr_type node, uint32_t level) {
+      // If a Branch node as two siblings, then this method
+      // will return the sibling that is *not* on the path
+      // referenced by the `hash_chunk(hash, level)`... that is, the "other sibling"
+      assert(type(node) == NodeType::Branch);
+      assert(size(node) == 2);
 
-      while (true) {
-        node_type* iterator = path.nodes[level];
-        assert(type(iterator) == NodeType::Branch &&
-               Branch::is_valid_index(iterator, hash_chunk(hash, level)));
-        const auto iterator_size = size(iterator);
+      const auto child_sparse_index = hash_chunk(hash, level);
+      assert(Branch::is_valid_index(node, child_sparse_index));
+      const auto child_dense_index = to_dense_index(child_sparse_index, node->payload_);
+      assert(child_dense_index < 2);
+      const auto other_dense_index = 1 - child_dense_index;
 
-        if (iterator_size > 1) {
-          const auto last_index = hash_chunk(hash, level);
-          const auto skip_index = to_dense_index(last_index, iterator->payload_);
-          node_ptr_type new_node = nullptr;
-          if (new_leaf != nullptr) {
-            new_node = Branch::duplicate(iterator, skip_index);     // Duplicate the branch node
-            *Branch::dense_ptr_at(new_node, skip_index) = new_leaf; // Overwrite the leaf
-          } else {
-            new_node = Branch::remove_from_branch_node(iterator, last_index);
-            assert(size(new_node) + 1 == iterator_size);
-          }
-          return rewrite_and_attach(path, hash, level, new_node);
-        }
-
-        if (level == 0) { // deleting a long branch to a single node
-          return new_leaf;
-        }
-
-        --level;
-      }
-      return new_root;
+      // Okay, is the other node a leaf node?
+      return *Branch::dense_ptr_at(node, other_dense_index);
     };
 
     if (leaf_index == NotAnIndex) { // value not in tree
       return root;
     }
 
-    if (path.size == 0) { // Special case: deleting the last item in the trie
-      return nullptr;
-    }
-
-    if (size(path.leaf_end) > 1) { // Special case: deleting from a "many value" leaf
+    if (size(path.leaf_end) > 1) { // Special case: deleting from "many value" leaf
       auto new_leaf = Leaf::duplicate_leaf(path.leaf_end, leaf_index);
+      dec_ref(new_leaf);
+      new_leaf = Leaf::duplicate_leaf(path.leaf_end, leaf_index);
+      dec_ref(new_leaf);
+      new_leaf = Leaf::duplicate_leaf(path.leaf_end, leaf_index);
       return rewrite_branch_path(path, hash, new_leaf, new_leaf);
     }
 
-    if (path.size > 0 && Branch::size(path.nodes[path.size - 1]) == 2) {
-      // See if we can delete part of the tree...
-      const auto penultimate_level = path.size - 1;
-      auto penultimate = path.nodes[penultimate_level];
-      const auto to_del_sparse_index = hash_chunk(hash, penultimate_level);
-      assert(Branch::is_valid_index(penultimate, to_del_sparse_index));
-      const auto to_del_dense_index = to_dense_index(to_del_sparse_index, penultimate->payload_);
-      assert(to_del_dense_index < 2);
-      const auto other_dense_index = 1 - to_del_dense_index;
+    // While rolling up the tree, we may find a single leaf node
+    // that we can attach higher up. This is called the `leaf_in_hand`
+    // and is held and attached if appropriate
+    node_ptr_type leaf_in_hand = nullptr;
+    node_ptr_type new_root = nullptr;
+    auto level = path.size;
 
-      // Okay, is the other node a leaf node?
-      node_ptr_type other = *Branch::dense_ptr_at(penultimate, other_dense_index);
-      if (type(other) == NodeType::Leaf) {
-        return rollup_path(other); // Roll up the entire path, putting leaf on the end
+    while (level > 0) {
+      --level;
+      node_ptr_type iterator = path.nodes[level];
+      const auto iterator_size = size(iterator);
+
+      if (leaf_in_hand == nullptr && iterator_size == 2) {
+        node_ptr_type sibling = other_sibling(iterator, level);
+        if (type(sibling) == NodeType::Leaf) {
+          leaf_in_hand = sibling;
+          add_ref(leaf_in_hand); // this will be attached elsewhere
+          continue;
+        }
       }
 
-      // Okay, we need to splice out the del node, and rewrite branch
-      auto new_node = Branch::remove_from_branch_node(penultimate, to_del_sparse_index);
-      return rewrite_and_attach(path, hash, penultimate_level, new_node);
+      if (iterator_size > 1) {
+        const auto last_index = hash_chunk(hash, level);
+        const auto skip_index = to_dense_index(last_index, iterator->payload_);
+        node_ptr_type new_node = nullptr;
+        if (leaf_in_hand != nullptr) {
+          new_node = Branch::duplicate(iterator, skip_index);         // Duplicate the branch node
+          *Branch::dense_ptr_at(new_node, skip_index) = leaf_in_hand; // Overwrite with leaf
+        } else {
+          new_node = Branch::remove_from_branch_node(iterator, last_index);
+        }
+        return rewrite_and_attach(path, hash, level, new_node);
+      }
     }
 
-    // if (size(path.leaf_end) == 2 && path.size > 0 &&
-    //     size(path.nodes[path.size - 1]) == 1) { // Role up that lonely leaf
-    //   auto new_leaf = Leaf::duplicate_leaf(path.leaf_end, leaf_index);
-    //   return rollup_path(new_leaf);
-    // }
-
-    // Need to "roll up" path, until we find a branch with more than one child
-    return rollup_path();
+    // The tree is empty... so return the leaf in hand.
+    // (If null, this would be deleting the last node.)
+    return leaf_in_hand;
   }
 
   //@}
@@ -787,6 +778,7 @@ public:
   using pointer_type = std::conditional<is_const_reference, const value_type*, value_type*>::type;
   using node_type = typename NodeOps::node_type;
   using node_ptr_type = node_type*;
+  using node_const_ptr_type = const node_type*;
 
 private:
   static constexpr uint32_t NotADepth{static_cast<uint32_t>(-1)};
@@ -798,7 +790,7 @@ public:
   struct MakeBeginTag {};
   struct MakeEndTag {};
 
-  Iterator(const node_ptr_type root, MakeBeginTag tag) : depth_{0} {
+  Iterator(node_ptr_type root, MakeBeginTag tag) : depth_{0} {
     path_[0] = root;
     position_[0] = 0;
     if (root == nullptr)
@@ -808,7 +800,7 @@ public:
     assert_invariant_();
   }
 
-  Iterator(const node_ptr_type root, MakeEndTag tag) : depth_{NotADepth} {
+  Iterator(node_ptr_type root, MakeEndTag tag) : depth_{NotADepth} {
     path_[0] = root;
     assert_invariant_();
   }
@@ -961,6 +953,7 @@ private:
   using Ops = detail::NodeOps<ItemType, Hash, KeyEqual, Allocator, IsThreadSafe>;
   using node_type = typename Ops::node_type;
   using node_ptr_type = node_type*;
+  using node_const_ptr_type = const node_type*;
   using NodeType = detail::NodeType;
 
 public:
@@ -982,8 +975,8 @@ public:
   //@}
 
 private:
-  node_type* root_{nullptr}; //!< Root of the tree could be branch of leaf
-  std::size_t size_{0};      //!< Current size of the Set
+  node_ptr_type root_{nullptr}; //!< Root of the tree could be branch of leaf
+  std::size_t size_{0};         //!< Current size of the Set
 
 public:
   //@{ Construction/Destruction
@@ -1097,7 +1090,7 @@ public:
   //@}
 
 private:
-  node_type* get_root_() { return root_; }
+  node_ptr_type get_root_() { return root_; }
 
   static size_t calculate_hash(const value_type& value) { return Ops::calculate_hash(value); }
 
@@ -1179,24 +1172,10 @@ private:
 
   size_type erase_(const key_type& key) {
 
-    auto assert_it = [this](node_ptr_type node) {
-      if (size_ == 8) {
-        assert(Ops::type(node) == NodeType::Branch);
-        assert(Ops::size(node) == 5);
-        assert(Ops::type(*Ops::Branch::dense_ptr_at(node, 0)) == NodeType::Leaf);
-        assert(Ops::type(*Ops::Branch::dense_ptr_at(node, 1)) == NodeType::Leaf);
-        assert(Ops::type(*Ops::Branch::dense_ptr_at(node, 2)) == NodeType::Leaf);
-        assert(Ops::type(*Ops::Branch::dense_ptr_at(node, 3)) == NodeType::Branch);
-        assert(Ops::type(*Ops::Branch::dense_ptr_at(node, 4)) == NodeType::Leaf);
-      }
-    };
-
     node_ptr_type new_root = Ops::erase(root_, key);
     const bool success = (new_root != root_);
     if (success) {
-      assert_it(new_root);
       Ops::dec_ref(root_);
-      assert_it(new_root);
       root_ = new_root;
       --size_;
       return 1;

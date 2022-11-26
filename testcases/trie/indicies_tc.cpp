@@ -118,6 +118,8 @@ auto get_root(auto& trie) { return get_root1(*reinterpret_cast<TracedItemSetType
 template <typename NodeOps, typename Function>
 void for_each_node(typename NodeOps::node_type* node, Function f) {
   using NodeType = detail::NodeType;
+  if (node == nullptr)
+    return; // empty
   f(node);
   if (NodeOps::type(node) == NodeType::Branch) {
     auto* start = NodeOps::Branch::dense_ptr_at(node, 0);
@@ -141,6 +143,9 @@ void for_each_leaf(typename NodeOps::node_type* root, Function f) {
 
 template <typename NodeOps>
 void dot_graph(const char* filename, typename NodeOps::node_type* root) {
+  if (root == nullptr)
+    return;
+
   using NodeType = detail::NodeType;
   auto node_name = [](typename NodeOps::node_type* node) -> std::string {
     return fmt::format("{:c}0x{:08x}{}", (NodeOps::type(node) == NodeType::Branch ? 'B' : 'L'),
@@ -211,7 +216,23 @@ void check_trie_invariants(typename NodeOps::node_type* root, std::size_t tree_s
   };
 
   // Check each leaf nodes
-  for_each_leaf<NodeOps>(root, check_leaf);
+  // for_each_leaf<NodeOps>(root, check_leaf);
+
+  // If a branch node has a single child, it must be another branch node
+  auto check_node = [root, &check_leaf](node_type_ptr node) {
+    if (NodeOps::type(node) == detail::NodeType::Leaf) {
+      check_leaf(node);
+    } else {
+      CATCH_REQUIRE(NodeOps::type(node) == detail::NodeType::Branch);
+      CATCH_REQUIRE(NodeOps::size(node) > 0);
+      // If the branch-node is size1, then the child must be a branch node
+      if (NodeOps::size(node) == 1) {
+        node_type_ptr child = *NodeOps::Branch::dense_ptr_at(node, 0);
+        CATCH_REQUIRE(NodeOps::type(child) == detail::NodeType::Branch);
+      }
+    }
+  };
+  for_each_node<NodeOps>(root, check_node);
 
   CATCH_REQUIRE(leaf_count == tree_size);
 }
@@ -573,15 +594,13 @@ template <typename SetType> void trie_ops_test() {
     }
 
     while (set.size() > 0) {
-      std::cout << fmt::format("\n\n--- DELETE FROM SET SIZE {} ---\n", set.size());
-      if (false) {
+      { // Test removing any element
         for (const auto& item : set) {
           auto temp_set = set;
           bool was_erased = temp_set.erase(item);
           CATCH_REQUIRE(was_erased == true);
           CATCH_REQUIRE(temp_set.size() + 1 == set.size());
           auto root = private_hack::get_root(temp_set);
-          dot_graph<Ops>(fmt::format("/tmp/{}.dot", test_number++).c_str(), root);
           check_trie_invariants<Ops>(root, temp_set.size());
         }
       }

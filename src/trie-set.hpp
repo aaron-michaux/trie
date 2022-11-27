@@ -1326,6 +1326,8 @@ public:
   //@}
 
   //@{ Lookup
+  // const value_type& at(const key_type& key) const;         // std::out_of_range
+  // const value_type& operator[](const key_type& key) const; // std::out_of_range
   std::size_t count(const key_type& key) const { return contains(key); }
   std::optional<item_type> find(const key_type& key) const {
     auto* ptr = find_(key);

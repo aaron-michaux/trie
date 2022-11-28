@@ -1,6 +1,6 @@
 
 # These will be set from the outside
-TARGET?=zero
+TARGET?=trie
 SOURCES?=$(shell find src -type f -name '*.cpp' -o -name '*.c')
 TOOLCHAIN_NAME?=gcc-11
 TOOLCHAIN_CONFIG?=release
@@ -37,7 +37,7 @@ WARNINGS:=-Wno-variadic-macros
 
 # Configure includes
 INCDIRS:=-Isrc -isystemcontrib/include -isystem/usr/local/include
-LDFLAGS+=-lunifex -lpthread -lssl -lcrypto
+LDFLAGS+=
 CFLAGS+= $(INCDIRS) $(DEFINES)
 CXXFLAGS+= -DFMT_HEADER_ONLY $(INCDIRS) $(DEFINES) $(WARNINGS)
 

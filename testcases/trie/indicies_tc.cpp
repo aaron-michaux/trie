@@ -397,8 +397,9 @@ template <typename T> void test_node_size() {
 }
 
 template <typename T> void test_node_configuration() {
-  test_node_size<detail::NodeOps<T, std::hash<T>, std::equal_to<T>, true>>();
-  test_node_size<detail::NodeOps<T, std::hash<T>, std::equal_to<T>, false>>();
+
+  test_node_size<detail::NodeOps<T, T, std::hash<T>, std::equal_to<T>, false, true>>();
+  test_node_size<detail::NodeOps<T, T, std::hash<T>, std::equal_to<T>, false, false>>();
 }
 
 CATCH_TEST_CASE("node_configuration", "[node_configuration]") {
@@ -429,7 +430,7 @@ CATCH_TEST_CASE("node_configuration", "[node_configuration]") {
 
 CATCH_TEST_CASE("trie_construct_destruct", "[trie_construct_destruct]") {
   uint32_t counter{0}; // Tracks how many times the constructor/destructor is called
-  using Ops = detail::NodeOps<TracedItem>;
+  using Ops = detail::NodeOps<TracedItem, TracedItem>;
 
   { // Constructor should be called 4 times, and same with destructor
     auto* node_ptr = Ops::Leaf::make_uninitialized(4, 4);
@@ -444,8 +445,9 @@ CATCH_TEST_CASE("trie_construct_destruct", "[trie_construct_destruct]") {
 }
 
 CATCH_TEST_CASE("trie_ops_safe_destroy", "[trie_ops_safe_destroy]") {
-  using Ops = detail::NodeOps<TracedItemSetType::item_type, TracedItemSetType::hasher,
-                              TracedItemSetType::key_equal, TracedItemSetType::is_thread_safe>;
+  using Ops = detail::NodeOps<TracedItemSetType::key_type, TracedItemSetType::value_type,
+                              TracedItemSetType::hasher, TracedItemSetType::key_equal, false,
+                              TracedItemSetType::is_thread_safe>;
   Ops::destroy(nullptr); // should not crash
 }
 
@@ -457,8 +459,9 @@ template <typename SetType> void trie_ops_test() {
     SetType set;
     using ItemType = typename SetType::item_type;
     // using NodeType = detail::NodeType;
-    using Ops = detail::NodeOps<typename SetType::item_type, typename SetType::hasher,
-                                typename SetType::key_equal, SetType::is_thread_safe>;
+    using Ops = detail::NodeOps<typename SetType::item_type, typename SetType::item_type,
+                                typename SetType::hasher, typename SetType::key_equal, false,
+                                SetType::is_thread_safe>;
 
     // Inserting the following sequence, to test code paths, hash is 32 bits
     // value =   1,         hash = 00|00-000|0 0000-|0000 0|000-00|00 000|0-0001

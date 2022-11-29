@@ -20,6 +20,7 @@ struct NodeOps {
   using node_type = NodeData<IsThreadSafe>;
   using node_ptr_type = node_type*;
   using node_const_ptr_type = const node_type*;
+  using size_type = std::size_t;
   using hash_type = std::size_t;
   using node_size_type = typename node_type::node_size_type;
   using ref_count_type = typename node_type::ref_count_type;
@@ -29,12 +30,9 @@ struct NodeOps {
   using Branch = BranchNodeOps<IsThreadSafe>;
   using Leaf = LeafNodeOps<item_type, IsThreadSafe>;
 
-  //@{ Factory/Destroy
-  static node_ptr_type make_empty(NodeType type) {
-    return (type == NodeType::Branch) ? Branch::make_empty() : Leaf::make_empty();
-  }
+  static constexpr bool is_thread_safe = IsThreadSafe;
 
-  static void destroy(node_ptr_type node_ptr) {
+  static constexpr void destroy(node_ptr_type node_ptr) {
     if (node_ptr == nullptr) {
       return;
     }
@@ -64,18 +62,18 @@ struct NodeOps {
   //@}
 
   //@{ Getters
-  static NodeType type(node_const_ptr_type node) { return node->type(); }
+  static constexpr NodeType type(node_const_ptr_type node) { return node->type(); }
 
-  static std::size_t size(node_const_ptr_type node) {
+  static constexpr size_type size(node_const_ptr_type node) {
     return (node->type() == NodeType::Branch) ? Branch::size(node) : Leaf::size(node);
   }
 
-  static bool is_valid_index(node_const_ptr_type node) {
+  static constexpr bool is_valid_index(node_const_ptr_type node) {
     return (node->type() == NodeType::Branch) ? Branch::is_valid_index(node)
                                               : Leaf::is_valid_index(node);
   }
 
-  static std::size_t hash(node_const_ptr_type node) {
+  static constexpr hash_type hash(node_const_ptr_type node) {
     assert(node != nullptr);
     assert(node->type() == NodeType::Leaf);
     assert(Leaf::size(node) > 0);
@@ -85,15 +83,15 @@ struct NodeOps {
   //@}
 
   //@{ Reference counting
-  static void add_ref(node_const_ptr_type node) {
+  static constexpr void add_ref(node_const_ptr_type node) {
     if (node != nullptr)
       node->add_ref();
   }
-  static void dec_ref(node_const_ptr_type node) {
+  static constexpr void dec_ref(node_const_ptr_type node) {
     if (node != nullptr && node->dec_ref() == 0)
       destroy(const_cast<node_ptr_type>(node));
   }
-  static ref_count_type ref_count(node_const_ptr_type node) {
+  static constexpr ref_count_type ref_count(node_const_ptr_type node) {
     return (node == nullptr) ? 0 : node->ref_count();
   }
   //@}
@@ -109,7 +107,7 @@ struct NodeOps {
     }
   };
 
-  static TreePath make_path(node_ptr_type root, std::size_t hash) {
+  static constexpr TreePath make_path(node_ptr_type root, hash_type hash) {
     TreePath path;
     auto node = root;
     while (node != nullptr && type(node) == NodeType::Branch) {
@@ -141,8 +139,9 @@ struct NodeOps {
    *
    * @return The new root of the tree
    */
-  static node_ptr_type rewrite_branch_path(const TreePath& path, std::size_t hash,
-                                           node_ptr_type new_node, node_ptr_type leaf_end) {
+  static constexpr node_ptr_type rewrite_branch_path(const TreePath& path, hash_type hash,
+                                                     node_ptr_type new_node,
+                                                     node_ptr_type leaf_end) {
     // When editing the tree, we need to make a copy of all the branch nodes,
     // Returning the head+tail, i.e, the new root, and the new branch node at the tip
     if (path.size == 0)
@@ -170,8 +169,8 @@ struct NodeOps {
     return rewrite_and_attach(path, hash, last_level, iterator);
   }
 
-  static node_ptr_type rewrite_and_attach(const TreePath& path, std::size_t hash, uint32_t level,
-                                          node_ptr_type splice_node) {
+  static constexpr node_ptr_type rewrite_and_attach(const TreePath& path, hash_type hash,
+                                                    uint32_t level, node_ptr_type splice_node) {
     auto iterator = splice_node;
     for (auto i = level; i > 0; --i) {
       auto* node = path.nodes[i - 1];
@@ -200,8 +199,8 @@ struct NodeOps {
    * Returns {branch-head, new-leaf}
    */
   template <typename Value>
-  static std::pair<node_ptr_type, node_ptr_type>
-  branch_to_leaves(const std::size_t value_hash, uint32_t level, node_ptr_type existing_leaf,
+  static constexpr std::pair<node_ptr_type, node_ptr_type>
+  branch_to_leaves(const hash_type value_hash, uint32_t level, node_ptr_type existing_leaf,
                    Value&& value) {
     assert(type(existing_leaf) == NodeType::Leaf);
     assert(Leaf::size(existing_leaf) > 0);
@@ -256,17 +255,17 @@ struct NodeOps {
     return {branch, new_leaf};
   }
 
-  static size_t calculate_hash(const item_type& value) {
+  static constexpr size_t calculate_hash(const item_type& value) {
     hasher hash_fun;
     return hash_fun(value);
   }
 
-  static bool calculate_equals(const item_type& lhs, const item_type& rhs) {
+  static constexpr bool calculate_equals(const item_type& lhs, const item_type& rhs) {
     key_equal fun;
     return fun(lhs, rhs);
   }
 
-  static uint32_t get_index_in_leaf(const item_type& value, node_const_ptr_type leaf) {
+  static constexpr uint32_t get_index_in_leaf(const item_type& value, node_const_ptr_type leaf) {
     if (leaf != nullptr) {
       assert(type(leaf) == NodeType::Leaf);
       auto* start = Leaf::ptr_at(leaf, 0);
@@ -280,8 +279,8 @@ struct NodeOps {
   }
 
   template <typename Predicate>
-  static uint32_t get_index_in_leaf_with_predicate(Predicate&& predicate,
-                                                   node_const_ptr_type leaf) {
+  static constexpr uint32_t get_index_in_leaf_with_predicate(Predicate&& predicate,
+                                                             node_const_ptr_type leaf) {
     if (leaf != nullptr) {
       assert(type(leaf) == NodeType::Leaf);
       auto* start = Leaf::ptr_at(leaf, 0);
@@ -295,7 +294,8 @@ struct NodeOps {
   }
 
   template <typename Predicate>
-  static node_ptr_type erase(node_ptr_type root, const std::size_t hash, Predicate&& predicate) {
+  static constexpr node_ptr_type erase(node_ptr_type root, const hash_type hash,
+                                       Predicate&& predicate) {
     // 1. Find the node (if it's not found, return zero)
     // 2. Delete the leaf, and "roll up"
 
@@ -374,7 +374,8 @@ struct NodeOps {
   }
   //@}
 
-  template <typename Value> static node_ptr_type do_insert(node_ptr_type root, Value&& value) {
+  template <typename Value>
+  static constexpr node_ptr_type do_insert(node_ptr_type root, Value&& value) {
     if (root == nullptr) { // inserting into an empty tree: trivial case
       return Leaf::make(std::forward<Value>(value));
     }
@@ -413,14 +414,14 @@ struct NodeOps {
     return new_root;
   }
 
-  static const item_type* find(node_const_ptr_type root, const item_type& key) {
+  static constexpr const item_type* find(node_const_ptr_type root, const item_type& key) {
     return find_if(root, calculate_hash(key),
                    [&key](const item_type& item) { return calculate_equals(key, item); });
   }
 
   template <typename Predicate>
-  static const item_type* find_if(node_const_ptr_type root, std::size_t hash,
-                                  Predicate&& predicate) {
+  static constexpr const item_type* find_if(node_const_ptr_type root, hash_type hash,
+                                            Predicate&& predicate) {
     auto node = root;
     auto level = 0u;
     if (node != nullptr) {

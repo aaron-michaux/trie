@@ -27,11 +27,7 @@ constexpr uint8_t branch_free_popcount(uint32_t x) {
   return static_cast<uint8_t>(((x + (x >> 4) & 0x0f0f0f0fu) * 0x01010101u) >> 24);
 }
 
-constexpr uintptr_t cast_pointer(const void* ptr) {
-  uintptr_t value;
-  std::memcpy(&value, &ptr, sizeof(const void*));
-  return value;
-}
+constexpr uintptr_t cast_pointer(const void* ptr) { return std::bit_cast<uintptr_t>(ptr); }
 
 /**
  * @return The number of bits in 'x' with value 1
@@ -63,8 +59,6 @@ constexpr uint32_t hash_chunk(std::size_t hash, uint32_t chunk_number) {
   return (hash & mask) >> (chunk_number * 5);
 }
 
-enum class NodeType : int { Branch = 0, Leaf = 1 };
-
 /**
  * The bytes between successive objects in an array of T
  */
@@ -81,6 +75,10 @@ constexpr std::size_t calculate_logical_size_(std::size_t align, std::size_t siz
 template <typename T> constexpr std::size_t calculate_logical_size() {
   return calculate_logical_size_(alignof(T), sizeof(T));
 }
+
+// ---------------------------------------------------------------------------------------- NodeType
+
+enum class NodeType : int { Branch = 0, Leaf = 1 };
 
 // ---------------------------------------------------------------------------------------- NodeData
 

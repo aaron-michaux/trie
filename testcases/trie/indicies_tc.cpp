@@ -367,13 +367,14 @@ CATCH_TEST_CASE("node_type", "[node_type]") {
 }
 
 template <typename T> void test_node_size() {
+  using NodeType = detail::NodeType;
   {
-    auto node = T::make_empty(detail::NodeType::Branch);
+    auto node = T::Branch::make_uninitialized(0, 0);
     CATCH_REQUIRE(T::size(node) == 0);
-    CATCH_REQUIRE(T::type(node) == detail::NodeType::Branch);
+    CATCH_REQUIRE(T::type(node) == NodeType::Branch);
     CATCH_REQUIRE(T::Branch::offset() >= sizeof(typename T::node_type));
-    auto address_0 = reinterpret_cast<uintptr_t>(T::Branch::dense_ptr_at(node, 0));
-    CATCH_REQUIRE(address_0 >= reinterpret_cast<uintptr_t>(node) + sizeof(typename T::node_type));
+    auto address_0 = std::bit_cast<uintptr_t>(T::Branch::dense_ptr_at(node, 0));
+    CATCH_REQUIRE(address_0 >= std::bit_cast<uintptr_t>(node) + sizeof(typename T::node_type));
     CATCH_REQUIRE(address_0 % T::Branch::AlignOf == 0);
     CATCH_REQUIRE(T::Branch::AlignOf == alignof(void*));
     CATCH_REQUIRE(T::ref_count(node) == 1);
@@ -381,13 +382,14 @@ template <typename T> void test_node_size() {
     CATCH_REQUIRE(T::ref_count(node) == 0);
     std::free(node);
   }
+
   {
-    auto node = T::make_empty(detail::NodeType::Leaf);
+    auto node = T::Leaf::make_uninitialized(0, 0);
     CATCH_REQUIRE(T::size(node) == 0);
-    CATCH_REQUIRE(T::type(node) == detail::NodeType::Leaf);
+    CATCH_REQUIRE(T::type(node) == NodeType::Leaf);
     CATCH_REQUIRE(T::Leaf::offset() >= sizeof(typename T::node_type));
-    auto address_0 = reinterpret_cast<uintptr_t>(T::Leaf::ptr_at(node, 0));
-    CATCH_REQUIRE(address_0 >= reinterpret_cast<uintptr_t>(node) + sizeof(typename T::node_type));
+    auto address_0 = std::bit_cast<uintptr_t>(T::Leaf::ptr_at(node, 0));
+    CATCH_REQUIRE(address_0 >= std::bit_cast<uintptr_t>(node) + sizeof(typename T::node_type));
     CATCH_REQUIRE(address_0 % alignof(typename T::Leaf::item_type) == 0);
     CATCH_REQUIRE(T::ref_count(node) == 1);
     node->dec_ref();
@@ -397,7 +399,6 @@ template <typename T> void test_node_size() {
 }
 
 template <typename T> void test_node_configuration() {
-
   test_node_size<detail::NodeOps<T, T, std::hash<T>, std::equal_to<T>, false, true>>();
   test_node_size<detail::NodeOps<T, T, std::hash<T>, std::equal_to<T>, false, false>>();
 }

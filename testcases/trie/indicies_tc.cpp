@@ -91,6 +91,11 @@ using TracedItemSetType = persistent_set<TracedItem, TracedItem::Hasher>;
 using MoveTracedItemSetType = persistent_set<MoveTracedItem, MoveTracedItem::Hasher>;
 using TrivialTracedItemSetType = persistent_set<TrivialTracedItem, TrivialTracedItem::Hasher>;
 
+using ItemSetType =
+    detail::base_set<typename TracedItemSetType::item_type, typename TracedItemSetType::item_type,
+                     typename TracedItemSetType::hasher, typename TracedItemSetType::key_equal,
+                     false, TracedItemSetType::is_thread_safe>;
+
 namespace private_hack {
 template <typename Tag> struct result {
   using type = typename Tag::type;
@@ -108,10 +113,10 @@ template <typename Tag, typename Tag::type p> typename rob<Tag, p>::filler rob<T
 
 template <typename T> struct Bf { using type = detail::NodeData<T::is_thread_safe>* (T::*)(); };
 
-template class rob<Bf<TracedItemSetType>, &TracedItemSetType::get_root_>;
+template class rob<Bf<ItemSetType>, &ItemSetType::get_root_>;
 template <typename T> auto get_root1(T& trie) { return (trie.*result<Bf<T>>::ptr)(); }
 
-auto get_root(auto& trie) { return get_root1(*reinterpret_cast<TracedItemSetType*>(&trie)); }
+auto get_root(auto& trie) { return get_root1(*reinterpret_cast<ItemSetType*>(&trie)); }
 
 } // namespace private_hack
 
@@ -446,7 +451,7 @@ CATCH_TEST_CASE("trie_construct_destruct", "[trie_construct_destruct]") {
 }
 
 CATCH_TEST_CASE("trie_ops_safe_destroy", "[trie_ops_safe_destroy]") {
-  using Ops = detail::NodeOps<TracedItemSetType::key_type, TracedItemSetType::value_type,
+  using Ops = detail::NodeOps<TracedItemSetType::item_type, TracedItemSetType::item_type,
                               TracedItemSetType::hasher, TracedItemSetType::key_equal, false,
                               TracedItemSetType::is_thread_safe>;
   Ops::destroy(nullptr); // should not crash
@@ -459,7 +464,6 @@ template <typename SetType> void trie_ops_test() {
   {
     SetType set;
     using ItemType = typename SetType::item_type;
-    // using NodeType = detail::NodeType;
     using Ops = detail::NodeOps<typename SetType::item_type, typename SetType::item_type,
                                 typename SetType::hasher, typename SetType::key_equal, false,
                                 SetType::is_thread_safe>;

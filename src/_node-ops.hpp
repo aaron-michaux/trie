@@ -255,14 +255,31 @@ struct NodeOps {
     return {branch, new_leaf};
   }
 
-  static constexpr size_t calculate_hash(const item_type& value) {
-    hasher hash_fun;
-    return hash_fun(value);
+  template <typename key_or_item_type>
+  static constexpr size_t calculate_hash(const key_or_item_type& value) {
+    hasher hash_func;
+    constexpr bool is_key = std::is_same<key_type, key_or_item_type>::value;
+    if constexpr (is_key) {
+      return hash_func(value);
+    } else {
+      return hash_func(value.first);
+    }
   }
 
-  static constexpr bool calculate_equals(const item_type& lhs, const item_type& rhs) {
-    key_equal fun;
-    return fun(lhs, rhs);
+  template <typename U, typename V>
+  static constexpr bool calculate_equals(const U& lhs, const V& rhs) {
+    key_equal equal_func;
+    constexpr bool lhs_is_key = std::is_same<key_type, U>::value;
+    constexpr bool rhs_is_key = std::is_same<key_type, V>::value;
+    if constexpr (lhs_is_key && rhs_is_key) {
+      return equal_func(lhs, rhs);
+    } else if constexpr (lhs_is_key && !rhs_is_key) {
+      return equal_func(lhs, rhs.first);
+    } else if constexpr (!lhs_is_key && rhs_is_key) {
+      return equal_func(lhs.item, rhs);
+    } else {
+      return equal_func(lhs.first, rhs.first);
+    }
   }
 
   static constexpr uint32_t get_index_in_leaf(const item_type& value, node_const_ptr_type leaf) {
@@ -278,30 +295,25 @@ struct NodeOps {
     return detail::NotAnIndex;
   }
 
-  template <typename Predicate>
-  static constexpr uint32_t get_index_in_leaf_with_predicate(Predicate&& predicate,
-                                                             node_const_ptr_type leaf) {
+  static constexpr uint32_t get_index_in_leaf(node_const_ptr_type leaf, const key_type& key) {
     if (leaf != nullptr) {
       assert(type(leaf) == NodeType::Leaf);
       auto* start = Leaf::ptr_at(leaf, 0);
       for (auto* iterator = start; iterator != start + Leaf::size(leaf); ++iterator) {
         assert(calculate_hash(*start) == calculate_hash(*iterator));
-        if (predicate(*iterator))
+        if (calculate_equals(key, *iterator))
           return static_cast<uint32_t>(iterator - start);
       }
     }
     return detail::NotAnIndex;
   }
 
-  template <typename Predicate>
-  static constexpr node_ptr_type erase(node_ptr_type root, const hash_type hash,
-                                       Predicate&& predicate) {
+  static constexpr node_ptr_type erase(node_ptr_type root, const key_type& key) {
     // 1. Find the node (if it's not found, return zero)
     // 2. Delete the leaf, and "roll up"
-
+    const hash_type hash = calculate_hash(key);
     const auto path = make_path(root, hash);
-    const auto leaf_index =
-        get_index_in_leaf_with_predicate(std::forward<Predicate>(predicate), path.leaf_end);
+    const auto leaf_index = get_index_in_leaf(path.leaf_end, key);
 
     auto other_sibling = [&](node_ptr_type node, uint32_t level) {
       // If a Branch node as two siblings, then this method
@@ -414,14 +426,8 @@ struct NodeOps {
     return new_root;
   }
 
-  static constexpr const item_type* find(node_const_ptr_type root, const item_type& key) {
-    return find_if(root, calculate_hash(key),
-                   [&key](const item_type& item) { return calculate_equals(key, item); });
-  }
-
-  template <typename Predicate>
-  static constexpr const item_type* find_if(node_const_ptr_type root, hash_type hash,
-                                            Predicate&& predicate) {
+  static constexpr const item_type* find(node_const_ptr_type root, const key_type& key) {
+    const auto hash = calculate_hash(key);
     auto node = root;
     auto level = 0u;
     if (node != nullptr) {
@@ -436,7 +442,7 @@ struct NodeOps {
         auto* start = Leaf::ptr_at(node, 0);
         auto* finish = start + Leaf::size(node);
         for (auto iterator = start; iterator != finish; ++iterator) {
-          if (predicate(*iterator))
+          if (calculate_equals(*iterator, key))
             return iterator;
         }
       }

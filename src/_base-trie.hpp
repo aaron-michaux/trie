@@ -54,6 +54,13 @@ public:
   constexpr base_set(base_set&& other) noexcept { swap(other); }
   constexpr ~base_set() { Ops::dec_ref(root_); }
 
+  template <typename InputIt> constexpr base_set(InputIt first, InputIt last) {
+    insert(first, last);
+  }
+  constexpr base_set(std::initializer_list<item_type> ilist) {
+    insert(std::begin(ilist), std::end(ilist));
+  }
+
   template <typename Predicate> constexpr base_set erase_if(Predicate predicate) {
     auto copy = *this;
     for (const auto& item : *this) {
@@ -97,7 +104,7 @@ public:
   //@{ Capacity
   constexpr bool empty() const { return size() == 0; }
   constexpr std::size_t size() const { return size_; }
-  constexpr std::size_t max_size() const { return std::numeric_limits<std::size_t>::max(); }
+  static constexpr std::size_t max_size() { return std::numeric_limits<std::size_t>::max(); }
   //@}
 
   //@{ Modifiers
@@ -124,14 +131,14 @@ public:
     return insert(item_type{std::forward<Args>(args)...});
   }
 
-  constexpr size_type erase(const item_type& key) { return erase_(key); }
+  constexpr size_type erase(const key_type& key) { return erase_(key); }
 
   constexpr void swap(base_set& other) noexcept { // Should be able to swap onto itself
     std::swap(root_, other.root_);
     std::swap(size_, other.size_);
   }
 
-  constexpr std::optional<item_type> extract(const item_type& key) {
+  constexpr std::optional<item_type> extract(const key_type& key) {
     auto result = find(key);
     erase(key);
     return result;
@@ -139,19 +146,19 @@ public:
   //@}
 
   //@{ Lookup
-  constexpr std::size_t count(const item_type& key) const { return contains(key); }
-  constexpr std::optional<item_type> find(const item_type& key) const {
+  constexpr std::size_t count(const key_type& key) const { return contains(key); }
+  constexpr std::optional<item_type> find(const key_type& key) const {
     auto* ptr = Ops::find(root_, key);
     if (ptr != nullptr)
       return {*ptr};
     return {};
   }
-  constexpr bool contains(const item_type& key) const { return Ops::find(root_, key) != nullptr; }
+  constexpr bool contains(const key_type& key) const { return Ops::find(root_, key) != nullptr; }
   //@}
 
   //@{ Observers
-  constexpr hasher hash_function() const { return hasher{}; }
-  constexpr key_equal key_eq() const { return key_equal{}; }
+  static constexpr hasher hash_function() { return hasher{}; }
+  static constexpr key_equal key_eq() { return key_equal{}; }
   //@}
 
   //@{ Friends
@@ -196,17 +203,8 @@ private:
     return success;
   }
 
-  constexpr size_type erase_(const item_type& key) {
-    hasher hash_func;
-    return erase_(hash_func(key), [&key](const item_type& item) {
-      key_equal f;
-      return f(key, item);
-    });
-  }
-
-  template <typename Predicate>
-  constexpr size_type erase_(std::size_t hash, Predicate&& predicate) {
-    node_ptr_type new_root = Ops::erase(root_, hash, std::forward<Predicate>(predicate));
+  constexpr size_type erase_(const key_type& key) {
+    node_ptr_type new_root = Ops::erase(root_, key);
     const bool success = (new_root != root_);
     if (success) {
       Ops::dec_ref(root_);

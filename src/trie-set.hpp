@@ -26,213 +26,129 @@ namespace niggly::trie {
 
 // ---------------------------------------------------------------------------------- persistent_set
 
-template <typename ItemType,                           // Type of item to store
-          typename Hash = std::hash<ItemType>,         // Hash function for item
-          typename KeyEqual = std::equal_to<ItemType>, // Equality comparision for Item
-          bool IsThreadSafe = true                     // True if Set is threadsafe
-          >
-using persistent_set = detail::base_set<ItemType, ItemType, Hash, KeyEqual, false, IsThreadSafe>;
-
 // template <typename ItemType,                           // Type of item to store
 //           typename Hash = std::hash<ItemType>,         // Hash function for item
 //           typename KeyEqual = std::equal_to<ItemType>, // Equality comparision for Item
 //           bool IsThreadSafe = true                     // True if Set is threadsafe
 //           >
-// class persistent_set {
-// private:
-//   using Ops = detail::NodeOps<ItemType, Hash, KeyEqual, IsThreadSafe>;
-//   using node_type = typename Ops::node_type;
-//   using node_ptr_type = node_type*;
-//   using node_const_ptr_type = const node_type*;
-//   using NodeType = detail::NodeType;
+// using persistent_setz = detail::base_set<ItemType, ItemType, Hash, KeyEqual, false,
+// IsThreadSafe>;
 
-// public:
-//   //@{
-//   using item_type = ItemType;
-//   using size_type = std::size_t;
-//   using difference_type = std::ptrdiff_t;
-//   using hasher = Hash;
-//   using key_equal = KeyEqual;
-//   using reference = item_type&;
-//   using const_reference = const item_type&;
-//   using iterator = typename detail::Iterator<Ops, false>;
-//   using const_iterator = typename detail::Iterator<Ops, true>;
-//   static constexpr bool is_thread_safe = IsThreadSafe;
-//   //@}
+template <typename ItemType,                           // Type of item to store
+          typename Hash = std::hash<ItemType>,         // Hash function for item
+          typename KeyEqual = std::equal_to<ItemType>, // Equality comparision for Item
+          bool IsThreadSafe = true                     // True if Set is threadsafe
+          >
+class persistent_set {
+private:
+  using set_type = detail::base_set<ItemType, ItemType, Hash, KeyEqual, false, IsThreadSafe>;
+  set_type set_;
 
-// private:
-//   node_ptr_type root_{nullptr}; //!< Root of the tree could be branch of leaf
-//   std::size_t size_{0};         //!< Current size of the Set
+public:
+  using item_type = typename set_type::item_type;
+  using size_type = typename set_type::size_type;
+  using hash_type = typename set_type::hash_type;
+  using hasher = typename set_type::hasher;
+  using key_equal = typename set_type::key_equal;
+  using reference = typename set_type::reference;
+  using const_reference = typename set_type::const_reference;
+  using iterator = typename set_type::iterator;
+  using const_iterator = typename set_type::const_iterator;
+  static constexpr bool is_thread_safe = IsThreadSafe;
 
-// public:
-//   //@{ Construction/Destruction
-//   persistent_set() = default;
-//   persistent_set(const persistent_set& other) { *this = other; }
-//   persistent_set(persistent_set&& other) noexcept { swap(other); }
-//   ~persistent_set() { Ops::dec_ref(root_); }
+  //@{ Construction/Destruction
+  constexpr persistent_set() = default;
+  constexpr persistent_set(const persistent_set& other) = default;
+  constexpr persistent_set(persistent_set&& other) noexcept = default;
+  constexpr ~persistent_set() = default;
 
-//   template <typename Predicate> persistent_set erase_if(Predicate predicate) {
-//     auto copy = *this;
-//     for (const auto& item : *this) {
-//       if (predicate(item)) {
-//         copy.erase(item);
-//       }
-//     }
-//     return copy;
-//   }
-//   //@}
+  template <typename InputIt> constexpr persistent_set(InputIt first, InputIt last) {
+    set_.insert(first, last);
+  }
+  constexpr persistent_set(std::initializer_list<item_type> ilist) {
+    set_.insert(std::begin(ilist), std::end(ilist));
+  }
 
-//   //@{ Assignment
-//   persistent_set& operator=(const persistent_set& other) {
-//     Ops::dec_ref(root_);
-//     root_ = other.root_;
-//     size_ = other.size_;
-//     Ops::add_ref(root_);
-//     return *this;
-//   }
+  template <typename Predicate> persistent_set constexpr erase_if(Predicate&& predicate) {
+    auto copy = *this;
+    copy.set_ = set_.erase_if(std::forward<Predicate>(predicate));
+    return copy;
+  }
+  //@}
 
-//   persistent_set& operator=(persistent_set&& other) noexcept {
-//     swap(other);
-//     return *this;
-//   }
-//   //@}
+  //@{ Assignment
+  constexpr persistent_set& operator=(const persistent_set& other) = default;
+  constexpr persistent_set& operator=(persistent_set&& other) noexcept = default;
+  //@}
 
-//   //@{ Iterators
-//   iterator begin() { return iterator{root_, typename iterator::MakeBeginTag{}}; }
-//   const_iterator begin() const { return cbegin(); }
-//   const_iterator cbegin() const {
-//     return const_iterator{root_, typename const_iterator::MakeBeginTag{}};
-//   }
+  //@{ Iterators
+  constexpr iterator begin() { return set_.begin(); }
+  constexpr const_iterator begin() const { return set_.begin(); }
+  constexpr const_iterator cbegin() const { return set_.cbegin(); }
 
-//   iterator end() { return iterator{root_, typename iterator::MakeEndTag{}}; }
-//   const_iterator end() const { return cend(); }
-//   const_iterator cend() const {
-//     return const_iterator{root_, typename const_iterator::MakeEndTag{}};
-//   }
-//   //@}
+  constexpr iterator end() { return set_.end(); }
+  constexpr const_iterator end() const { return set_.end(); }
+  constexpr const_iterator cend() const { return set_.cend(); }
+  //@}
 
-//   //@{ Capacity
-//   bool empty() const { return size() == 0; }
-//   std::size_t size() const { return size_; }
-//   std::size_t max_size() const { return std::numeric_limits<std::size_t>::max(); }
-//   //@}
+  //@{ Capacity
+  constexpr bool empty() const { return set_.empty(); }
+  constexpr std::size_t size() const { return set_.size(); }
+  static constexpr std::size_t max_size() { return set_type::max_size(); }
+  //@}
 
-//   //@{ Modifiers
-//   void clear() {
-//     Ops::dec_ref(root_);
-//     root_ = nullptr;
-//     size_ = 0;
-//   }
+  //@{ Modifiers
+  constexpr void clear() { set_.clear(); }
 
-//   bool insert(const item_type& value) { return insert_(value); }
-//   bool insert(item_type&& value) { return insert_(std::move(value)); }
-//   template <class InputIt> void insert(InputIt first, InputIt last) {
-//     while (first != last) {
-//       insert_(*first);
-//       ++first;
-//     }
-//   }
-//   void insert(std::initializer_list<item_type> ilist) {
-//     for (auto&& item : ilist)
-//       insert_(std::move(item));
-//   }
+  constexpr bool insert(const item_type& value) { return set_.insert(value); }
+  constexpr bool insert(item_type&& value) { return set_.insert(std::move(value)); }
+  template <class InputIt> constexpr void insert(InputIt first, InputIt last) {
+    set_.insert(first, last);
+  }
+  constexpr void insert(std::initializer_list<item_type> ilist) { set_.insert(ilist); }
 
-//   template <class... Args> bool emplace(Args&&... args) {
-//     return insert(item_type{std::forward<Args>(args)...});
-//   }
+  template <class... Args> constexpr bool emplace(Args&&... args) {
+    return set_.emplace(std::forward<Args>(args)...);
+  }
 
-//   size_type erase(const item_type& key) { return erase_(key); }
+  constexpr size_type erase(const item_type& key) { return set_.erase(key); }
+  constexpr void swap(persistent_set& other) noexcept { set_.swap(other.set_); }
 
-//   void swap(persistent_set& other) noexcept { // Should be able to swap onto itself
-//     std::swap(root_, other.root_);
-//     std::swap(size_, other.size_);
-//   }
+  constexpr std::optional<item_type> extract(const item_type& key) { return set_.extract(key); }
+  //@}
 
-//   std::optional<item_type> extract(const item_type& key) {
-//     auto result = find(key);
-//     erase(key);
-//     return result;
-//   }
-//   //@}
+  //@{ Lookup
+  constexpr std::size_t count(const item_type& key) const { return set_.count(key); }
+  constexpr std::optional<item_type> find(const item_type& key) const { return set_.find(key); }
+  constexpr bool contains(const item_type& key) const { return set_.contains(key); }
+  //@}
 
-//   //@{ Lookup
-//   std::size_t count(const item_type& key) const { return contains(key); }
-//   std::optional<item_type> find(const item_type& key) const {
-//     auto* ptr = Ops::find(root_, key);
-//     if (ptr != nullptr)
-//       return {*ptr};
-//     return {};
-//   }
-//   bool contains(const item_type& key) const { return Ops::find(root_, key) != nullptr; }
-//   //@}
+  //@{ Observers
+  static constexpr hasher hash_function() { return hasher{}; }
+  static constexpr key_equal key_eq() { return key_equal{}; }
+  //@}
 
-//   //@{ Observers
-//   hasher hash_function() const { return hasher{}; }
-//   key_equal key_eq() const { return key_equal{}; }
-//   //@}
+  //@{ Friends
+  friend constexpr bool operator==(const persistent_set& lhs, const persistent_set& rhs) noexcept {
+    return lhs.set_ == rhs.set_;
+  }
 
-//   //@{ Friends
-//   friend bool operator==(const persistent_set& lhs, const persistent_set& rhs) noexcept {
-//     return lhs.root_ == rhs.root_;
-//   }
+  friend constexpr bool operator!=(const persistent_set& lhs, const persistent_set& rhs) noexcept {
+    return lhs.set_ != rhs.set_;
+  }
 
-//   friend bool operator!=(const persistent_set& lhs, const persistent_set& rhs) noexcept {
-//     return !(lhs == rhs);
-//   }
+  friend constexpr void swap(persistent_set& lhs, persistent_set& rhs) noexcept { lhs.swap(rhs); }
 
-//   friend void swap(persistent_set& lhs, persistent_set& rhs) noexcept { lhs.swap(rhs); }
+  template <typename Predicate>
+  friend constexpr size_type erase_if(persistent_set& set, Predicate&& predicate) {
+    const auto size_0 = set.size();
+    set = set.erase_if(std::forward<Predicate>(predicate));
+    return size_0 - set.size();
+  }
+  //@}
+};
 
-//   template <typename Predicate>
-//   friend size_type erase_if(persistent_set& set, Predicate predicate) {
-//     const auto size_0 = set.size();
-//     set = set.erase_if(std::forward<Predicate>(predicate));
-//     return size_0 - set.size();
-//   }
-//   //@}
-
-// private:
-//   node_ptr_type get_root_() { return root_; }
-
-//   template <typename Value> bool insert_(Value&& value) {
-//     node_ptr_type new_root = Ops::do_insert(root_, std::forward<Value>(value));
-//     const bool success = (new_root != root_);
-
-//     if (success) {
-//       if (root_ != nullptr && Ops::type(root_) == NodeType::Leaf &&
-//           Ops::type(new_root) == NodeType::Branch) {
-//         // Never `dec_ref` a root_ "leaf node", when new_root is a Branch
-//         // because that leaf will have become part of the tree.
-//         //
-//         // If new_root is a branch then there was a collision at the root
-//       } else {
-//         Ops::dec_ref(root_);
-//       }
-//       root_ = new_root;
-//       ++size_;
-//     }
-//     return success;
-//   }
-
-//   size_type erase_(const item_type& key) {
-//     hasher hash_func;
-//     return erase_(hash_func(key), [&key](const item_type& item) {
-//       key_equal f;
-//       return f(key, item);
-//     });
-//   }
-
-//   template <typename Predicate> size_type erase_(std::size_t hash, Predicate&& predicate) {
-//     node_ptr_type new_root = Ops::erase(root_, hash, std::forward<Predicate>(predicate));
-//     const bool success = (new_root != root_);
-//     if (success) {
-//       Ops::dec_ref(root_);
-//       root_ = new_root;
-//       --size_;
-//       return 1;
-//     }
-//     return 0;
-//   }
-// };
+// ---------------------------------------------------------------------------------- persistent_map
 
 template <typename KeyType,                           // Key type to reference values
           typename ValueType,                         // Value type for item stored
@@ -316,7 +232,7 @@ public:
   //@{ Capacity
   bool empty() const { return set_.empty(); }
   std::size_t size() const { return set_.size(); }
-  std::size_t max_size() const { return set_.max_size(); }
+  std::size_t max_size() { return set_.max_size(); }
   //@}
 
   //@{ Modifiers

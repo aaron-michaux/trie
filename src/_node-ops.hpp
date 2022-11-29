@@ -282,7 +282,7 @@ struct NodeOps {
     }
   }
 
-  static constexpr uint32_t get_index_in_leaf(const item_type& value, node_const_ptr_type leaf) {
+  static constexpr uint32_t get_index_in_leaf(const key_type& value, node_const_ptr_type leaf) {
     if (leaf != nullptr) {
       assert(type(leaf) == NodeType::Leaf);
       auto* start = Leaf::ptr_at(leaf, 0);
@@ -386,10 +386,10 @@ struct NodeOps {
   }
   //@}
 
-  template <typename Value>
-  static constexpr node_ptr_type do_insert(node_ptr_type root, Value&& value) {
+  template <typename ItemType>
+  static constexpr node_ptr_type do_insert(node_ptr_type root, ItemType&& item) {
     if (root == nullptr) { // inserting into an empty tree: trivial case
-      return Leaf::make(std::forward<Value>(value));
+      return Leaf::make(std::forward<ItemType>(item));
     }
 
     // TO ADD:
@@ -402,24 +402,57 @@ struct NodeOps {
     //     (c)       create a new path to discriminate between the existing and new leaf
     //     (d)       join the two paths together
     //  Finally: update the root
-    const auto hash = calculate_hash(value);
+    const auto hash = calculate_hash(item);
     const auto path = make_path(root, hash);
+    const auto leaf_index = get_index_in_leaf(item, path.leaf_end);
+
+    if (leaf_index != NotAnIndex) {
+      return root; // (2.a) Duplicate!
+    }
+    return finish_insert(hash, path, std::forward<ItemType>(item));
+  }
+
+  template <typename K, typename V>
+  static constexpr node_ptr_type do_key_value_insert(node_ptr_type root, K&& key, V&& value) {
+    assert(IsMap);
+    if (root == nullptr) { // inserting into an empty tree: trivial case
+      return Leaf::make(item_type{std::forward<K>(key), std::forward<V>(value)});
+    }
+
+    // TO ADD:
+    //  1. If there's no leaf node at the end, then
+    //     (a) rewrite the branch
+    //     (b) insert the new leaf into the tail of the rewrite
+    //  2. If there is an existing leaf
+    //     (a) if:   eq, then insert as failed
+    //     (b) else: rewrite the branch
+    //     (c)       create a new path to discriminate between the existing and new leaf
+    //     (d)       join the two paths together
+    //  Finally: update the root
+    const auto hash = calculate_hash(key);
+    const auto path = make_path(root, hash);
+    const auto leaf_index = get_index_in_leaf(key, path.leaf_end);
+
+    if (leaf_index != NotAnIndex) {
+      return root; // (2.a) Duplicate!
+    }
+    return finish_insert(hash, path, item_type{std::forward<K>(key), std::forward<V>(value)});
+  }
+
+  template <typename ItemType>
+  static constexpr node_ptr_type finish_insert(hash_type hash, const TreePath& path,
+                                               ItemType&& item) {
     node_ptr_type new_root = nullptr;
-
     if (path.leaf_end == nullptr) {
-      auto new_leaf = Leaf::make(std::forward<Value>(value));
+      auto new_leaf = Leaf::make(std::forward<ItemType>(item));
       new_root = rewrite_branch_path(path, hash, new_leaf, new_leaf);
-
-    } else if (get_index_in_leaf(value, path.leaf_end) != NotAnIndex) {
-      // (2.a) Duplicate!
-      new_root = root;
 
     } else {
       auto [new_branch, leaf_end] =
-          branch_to_leaves(hash,                        // Hash of the value
-                           path.size,                   // The path starts here
-                           path.leaf_end,               // Includes this node
-                           std::forward<Value>(value)); // Must include this new value
+          branch_to_leaves(hash,                          // Hash of the value
+                           path.size,                     // The path starts here
+                           path.leaf_end,                 // Includes this node
+                           std::forward<ItemType>(item)); // Must include this new value
       new_root = rewrite_branch_path(path, hash, new_branch, leaf_end);
     }
 

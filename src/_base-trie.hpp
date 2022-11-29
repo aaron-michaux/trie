@@ -129,9 +129,12 @@ public:
       insert_(std::move(item));
   }
 
-  template <typename P> constexpr bool insert_or_assign(const key_type& key, P&& value) {
-    assert(IsMap); // only makes sense for maps
-    return false;
+  template <typename V> constexpr bool insert_or_assign(const key_type& key, V&& value) {
+    return insert_or_assign_(key, std::forward<V>(value));
+  }
+
+  template <typename K, typename V> constexpr bool insert_or_assign(K&& key, V&& value) {
+    return insert_or_assign_(key, std::forward<V>(value));
   }
 
   template <typename... Args> constexpr bool emplace(Args&&... args) {
@@ -191,7 +194,15 @@ private:
   constexpr node_ptr_type get_root_() { return root_; }
 
   template <typename Value> constexpr bool insert_(Value&& value) {
-    node_ptr_type new_root = Ops::do_insert(root_, std::forward<Value>(value));
+    return update_root_after_insert_(Ops::do_insert(root_, std::forward<Value>(value)));
+  }
+
+  template <typename K, typename V> constexpr bool insert_or_assign_(K&& key, V&& value) {
+    return update_root_after_insert_(
+        Ops::do_key_value_insert(root_, std::forward<K>(key), std::forward<V>(value)));
+  }
+
+  constexpr bool update_root_after_insert_(node_ptr_type new_root) {
     const bool success = (new_root != root_);
 
     if (success) {

@@ -15,6 +15,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <type_traits>
 
 #include <cstdint>
@@ -229,6 +230,14 @@ public:
   //@}
 
   //@{ Lookup
+  constexpr const value_type* at(const key_type& key) const { return find(key); }
+  constexpr const value_type& operator[](const key_type& key) const {
+    auto* value = at(key);
+    if (value == nullptr)
+      throw std::out_of_range{};
+    return *value;
+  }
+
   constexpr std::size_t count(const key_type& key) const { return set_.count(key); }
   constexpr const value_type* find(const key_type& key) const {
     auto* item = set_.find(key);

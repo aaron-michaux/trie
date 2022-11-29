@@ -281,7 +281,6 @@ void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
     std::size_t counter = 0;
     for (auto ii = set.end(); ii != set.begin();) {
       --ii;
-      auto value = (*ii).value();
       CATCH_REQUIRE(is_value((*ii).value()));
       ++counter;
     }
@@ -294,6 +293,25 @@ void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
       CATCH_REQUIRE(*set.find(*ii) == *ii);
       CATCH_REQUIRE(set.contains(*ii));
     }
+  }
+
+  { // Should be able to move beyond the end, without effect
+    std::size_t counter = 0;
+    auto end = set.cend();
+    ++end;
+    for (auto ii = end; ii != set.cbegin();) {
+      --ii;
+      CATCH_REQUIRE(is_value((*ii).value()));
+      ++counter;
+    }
+    CATCH_REQUIRE(counter == values.size());
+  }
+
+  { // Should be able to move before the start, without effect
+    std::size_t counter = 0;
+    auto start = set.cbegin();
+    --start; // start should now be end!
+    CATCH_REQUIRE(start == set.cend());
   }
 }
 
@@ -455,6 +473,32 @@ CATCH_TEST_CASE("trie_ops_safe_destroy", "[trie_ops_safe_destroy]") {
                               TracedItemSetType::hasher, TracedItemSetType::key_equal, false,
                               TracedItemSetType::is_thread_safe>;
   Ops::destroy(nullptr); // should not crash
+}
+
+CATCH_TEST_CASE("duplicate_leaf", "[dupcliate_leaf]") {
+  uint32_t counter = 0;
+
+  using Ops = detail::NodeOps<TracedItem, TracedItem>;
+  using Leaf = Ops::Leaf;
+
+  auto* leaf_0 = Leaf::make(TracedItem{counter, 0});
+  auto* leaf_1 = Leaf::copy_append(leaf_0, TracedItem{counter, 1});
+  auto* leaf_2 = Leaf::duplicate_leaf(leaf_1, detail::NotAnIndex);
+
+  CATCH_REQUIRE(Leaf::size(leaf_0) == 1);
+  CATCH_REQUIRE(Leaf::size(leaf_1) == 2);
+  CATCH_REQUIRE(Leaf::size(leaf_2) == 2);
+
+  for (auto index = 0u; index < 2; ++index) {
+    CATCH_REQUIRE(Leaf::ptr_at(leaf_1, index)->value() == index);
+    CATCH_REQUIRE(Leaf::ptr_at(leaf_2, index)->value() == index);
+  }
+
+  Ops::dec_ref(leaf_0);
+  Ops::dec_ref(leaf_1);
+  Ops::dec_ref(leaf_2);
+
+  CATCH_REQUIRE(counter == 0);
 }
 
 template <typename SetType> void trie_ops_test() {

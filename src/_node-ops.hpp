@@ -205,8 +205,7 @@ struct NodeOps {
     assert(type(existing_leaf) == NodeType::Leaf);
     assert(Leaf::size(existing_leaf) > 0);
 
-    Hash hasher;
-    const auto existing_hash = hasher(*Leaf::ptr_at(existing_leaf, 0));
+    const auto existing_hash = calculate_hash(*Leaf::ptr_at(existing_leaf, 0));
 
     // Trivial cases: Hash collision => create new leaf with new value appended
     if (item_hash == existing_hash) { // Trivial case: hash collision
@@ -276,26 +275,15 @@ struct NodeOps {
     } else if constexpr (lhs_is_key && !rhs_is_key) {
       return equal_func(lhs, rhs.first);
     } else if constexpr (!lhs_is_key && rhs_is_key) {
-      return equal_func(lhs.item, rhs);
+      return equal_func(lhs.first, rhs);
     } else {
       return equal_func(lhs.first, rhs.first);
     }
   }
 
-  static constexpr uint32_t get_index_in_leaf(const key_type& value, node_const_ptr_type leaf) {
-    if (leaf != nullptr) {
-      assert(type(leaf) == NodeType::Leaf);
-      auto* start = Leaf::ptr_at(leaf, 0);
-      for (auto* iterator = start; iterator != start + Leaf::size(leaf); ++iterator) {
-        assert(calculate_hash(*start) == calculate_hash(*iterator));
-        if (calculate_equals(value, *iterator))
-          return static_cast<uint32_t>(iterator - start);
-      }
-    }
-    return detail::NotAnIndex;
-  }
-
-  static constexpr uint32_t get_index_in_leaf(node_const_ptr_type leaf, const key_type& key) {
+  template <typename key_or_item_type>
+  static constexpr uint32_t get_index_in_leaf(node_const_ptr_type leaf,
+                                              const key_or_item_type& key) {
     if (leaf != nullptr) {
       assert(type(leaf) == NodeType::Leaf);
       auto* start = Leaf::ptr_at(leaf, 0);
@@ -400,7 +388,7 @@ struct NodeOps {
     //  Finally: update the root
     const auto hash = calculate_hash(item);
     const auto path = make_path(root, hash);
-    const auto leaf_index = get_index_in_leaf(item, path.leaf_end);
+    const auto leaf_index = get_index_in_leaf(path.leaf_end, item);
 
     if (leaf_index != NotAnIndex) {
       return root; // (2.a) Duplicate!
@@ -427,7 +415,7 @@ struct NodeOps {
     //  Finally: update the root
     const auto hash = calculate_hash(key);
     const auto path = make_path(root, hash);
-    const auto leaf_index = get_index_in_leaf(key, path.leaf_end);
+    const auto leaf_index = get_index_in_leaf(path.leaf_end, key);
 
     if (leaf_index != NotAnIndex) { // Duplicate, so overwrite node
       auto new_leaf = Leaf::duplicate_leaf(path.leaf_end, leaf_index);

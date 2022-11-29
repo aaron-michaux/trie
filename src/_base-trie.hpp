@@ -116,11 +116,11 @@ public:
 
   constexpr bool insert(const item_type& value) { return insert_(value); }
 
-  template <typename P> constexpr bool insert(P&& value) { return insert_(std::move(value)); }
+  template <typename P> constexpr bool insert(P&& value) { return insert_(std::forward<P>(value)); }
 
   template <typename InputIt> constexpr void insert(InputIt first, InputIt last) {
     while (first != last) {
-      insert_(*first);
+      insert_cref_(*first);
       ++first;
     }
   }
@@ -192,6 +192,10 @@ public:
 
 private:
   constexpr node_ptr_type get_root_() { return root_; }
+
+  template <typename Value> constexpr bool insert_cref_(const Value& value) {
+    return update_root_after_insert_(Ops::do_insert(root_, value));
+  }
 
   template <typename Value> constexpr bool insert_(Value&& value) {
     return update_root_after_insert_(Ops::do_insert(root_, std::forward<Value>(value)));

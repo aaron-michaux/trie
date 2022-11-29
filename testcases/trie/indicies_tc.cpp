@@ -841,10 +841,106 @@ CATCH_TEST_CASE("trie_key_eq_func", "[trie_key_eq_func]") {
   CATCH_REQUIRE(!set_type::key_eq()(1, 2));
 }
 
-CATCH_TEST_CASE("trie_map", "[trie_map]") {
-  //  using map_type = persistent_map<std::string, TracedItem>;
+CATCH_TEST_CASE("trie_map_default_constructor", "[trie_map_default_constructor]") {
+  using map_type = persistent_map<std::string, TracedItem>;
+  auto map = std::make_unique<map_type>();
+  CATCH_REQUIRE(map->size() == 0);
+  CATCH_REQUIRE(map->empty());
+}
 
-  // map_type map;
+CATCH_TEST_CASE("trie_map_construct_insert", "[trie_map_construct_insert]") {
+  using namespace std::string_literals;
+  using map_type = persistent_map<std::string, int>;
+  std::vector<map_type::item_type> values{{{"one"s, 1}, {"two"s, 2}, {"three"s, 3}}};
+  map_type map{std::begin(values), std::end(values)};
+  CATCH_REQUIRE(map.size() == 3);
+  CATCH_REQUIRE(!map.empty());
+  CATCH_REQUIRE(values[0].first == "one"s); // Make sure we didn't move anything
+  CATCH_REQUIRE(values[1].first == "two"s);
+  CATCH_REQUIRE(values[2].first == "three"s);
+
+  for (const auto& [key, value] : values) {
+    CATCH_REQUIRE(map.contains(key));
+    CATCH_REQUIRE(map.count(key) == 1);
+    CATCH_REQUIRE(map.find(key) != nullptr);
+    CATCH_REQUIRE(*map.find(key) == value);
+  }
+  map.clear();
+  CATCH_REQUIRE(map.size() == 0);
+  for (const auto& [key, value] : values) {
+    CATCH_REQUIRE(!map.contains(key));
+    CATCH_REQUIRE(map.count(key) == 0);
+    CATCH_REQUIRE(map.find(key) == nullptr);
+  }
+}
+
+CATCH_TEST_CASE("trie_map_ilist", "[trie_map_ilist]") {
+  using namespace std::string_literals;
+  using map_type = persistent_map<std::string, int>;
+  map_type map{{{"one"s, 1}, {"two"s, 2}, {"three"s, 3}}};
+  CATCH_REQUIRE(map.size() == 3);
+}
+
+CATCH_TEST_CASE("trie_map_op=", "[trie_map_op=]") {
+  using namespace std::string_literals;
+  using map_type = persistent_map<std::string, int>;
+  std::vector<map_type::item_type> values{{{"one"s, 1}, {"two"s, 2}, {"three"s, 3}}};
+
+  map_type map{std::begin(values), std::end(values)};
+  map_type other{map};
+  map_type other2;
+
+  CATCH_REQUIRE(map.size() == other.size());
+  CATCH_REQUIRE(map.size() == 3);
+  CATCH_REQUIRE(map == other);
+  CATCH_REQUIRE(map != other2);
+  CATCH_REQUIRE(other2.size() == 0);
+
+  for (const auto& [key, value] : values) {
+    CATCH_REQUIRE(map.contains(key));
+    CATCH_REQUIRE(other.contains(key));
+    CATCH_REQUIRE(*map.find(key) == *other.find(key));
+    CATCH_REQUIRE(*map.find(key) == value);
+    CATCH_REQUIRE(!other2.contains(key));
+  }
+
+  other2 = map;
+  CATCH_REQUIRE(map == other2);
+  for (const auto& [key, value] : values) {
+    CATCH_REQUIRE(map.contains(key));
+    CATCH_REQUIRE(other2.contains(key));
+    CATCH_REQUIRE(*map.find(key) == *other2.find(key));
+  }
+}
+
+CATCH_TEST_CASE("trie_map_move=", "[trie_map_move=]") {
+  using namespace std::string_literals;
+  using map_type = persistent_map<std::string, int>;
+  std::vector<map_type::item_type> values{{{"one"s, 1}, {"two"s, 2}, {"three"s, 3}}};
+
+  map_type map{std::begin(values), std::end(values)};
+  map_type other{std::move(map)};
+
+  CATCH_REQUIRE(map != other);
+  CATCH_REQUIRE(map.size() != other.size());
+  CATCH_REQUIRE(other.size() == 3);
+
+  for (const auto& [key, value] : values) {
+    CATCH_REQUIRE(!map.contains(key));
+    CATCH_REQUIRE(other.contains(key));
+    CATCH_REQUIRE(*other.find(key) == value);
+  }
+
+  map = std::move(other);
+  CATCH_REQUIRE(map != other);
+  CATCH_REQUIRE(map.size() != other.size());
+  CATCH_REQUIRE(map.size() == 3);
+
+  for (const auto& [key, value] : values) {
+    CATCH_REQUIRE(map.contains(key));
+    CATCH_REQUIRE(!other.contains(key));
+    CATCH_REQUIRE(*map.find(key) == value);
+  }
 }
 
 } // namespace niggly::trie::test

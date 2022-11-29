@@ -104,12 +104,12 @@ struct LeafNodeOps : public BaseNodeOps<T, IsThreadSafe, false> {
   using node_size_type = typename Base::node_size_type;
   using ref_count_type = typename Base::ref_count_type;
 
-  template <typename P> static constexpr void copy_one(const P& src, item_type* dst) {
+  template <typename P> static constexpr void copy_one(P&& src, item_type* dst) {
     if constexpr (std::is_trivial<item_type>::value) {
       std::memcpy(dst, &src, sizeof(item_type));
     } else {
       static_assert(std::is_copy_constructible<item_type>::value);
-      new (dst) item_type{src};
+      new (dst) item_type{std::forward<P>(src)};
     }
   }
 

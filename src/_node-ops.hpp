@@ -198,10 +198,10 @@ struct NodeOps {
    *
    * Returns {branch-head, new-leaf}
    */
-  template <typename Value>
+  template <typename ItemType>
   static constexpr std::pair<node_ptr_type, node_ptr_type>
-  branch_to_leaves(const hash_type value_hash, uint32_t level, node_ptr_type existing_leaf,
-                   Value&& value) {
+  branch_to_leaves(const hash_type item_hash, uint32_t level, node_ptr_type existing_leaf,
+                   ItemType&& item) {
     assert(type(existing_leaf) == NodeType::Leaf);
     assert(Leaf::size(existing_leaf) > 0);
 
@@ -209,8 +209,8 @@ struct NodeOps {
     const auto existing_hash = hasher(*Leaf::ptr_at(existing_leaf, 0));
 
     // Trivial cases: Hash collision => create new leaf with new value appended
-    if (value_hash == existing_hash) { // Trivial case: hash collision
-      auto* new_leaf = Leaf::copy_append(existing_leaf, std::forward<Value>(value));
+    if (item_hash == existing_hash) { // Trivial case: hash collision
+      auto* new_leaf = Leaf::copy_append(existing_leaf, std::forward<ItemType>(item));
       return {new_leaf, new_leaf};
     }
 
@@ -235,11 +235,11 @@ struct NodeOps {
     for (auto i = level; new_leaf == nullptr; ++i) {
       assert(i < MaxTrieDepth); // otherwise there'd have to be a hash collission
       const auto index_lhs = hash_chunk(existing_hash, i);
-      const auto index_rhs = hash_chunk(value_hash, i);
+      const auto index_rhs = hash_chunk(item_hash, i);
       if (index_lhs == index_rhs) {
         append_to_tail(Branch::make_uninitialized(1, 1u << index_lhs), index_lhs);
       } else { // divergence
-        new_leaf = Leaf::make(std::forward<Value>(value));
+        new_leaf = Leaf::make(std::forward<ItemType>(item));
         const auto pattern = (1u << index_lhs) | (1u << index_rhs);
         append_to_tail(Branch::make_uninitialized(2, pattern), 0 /* irrelevant */);
         *Branch::ptr_at(tail, index_lhs) = existing_leaf;
@@ -338,10 +338,6 @@ struct NodeOps {
 
     if (size(path.leaf_end) > 1) { // Special case: deleting from "many value" leaf
       auto new_leaf = Leaf::duplicate_leaf(path.leaf_end, leaf_index);
-      dec_ref(new_leaf);
-      new_leaf = Leaf::duplicate_leaf(path.leaf_end, leaf_index);
-      dec_ref(new_leaf);
-      new_leaf = Leaf::duplicate_leaf(path.leaf_end, leaf_index);
       return rewrite_branch_path(path, hash, new_leaf, new_leaf);
     }
 
@@ -433,8 +429,11 @@ struct NodeOps {
     const auto path = make_path(root, hash);
     const auto leaf_index = get_index_in_leaf(key, path.leaf_end);
 
-    if (leaf_index != NotAnIndex) {
-      return root; // (2.a) Duplicate!
+    if (leaf_index != NotAnIndex) { // Duplicate, so overwrite node
+      auto new_leaf = Leaf::duplicate_leaf(path.leaf_end, leaf_index);
+      Leaf::copy_one(item_type{std::forward<K>(key), std::forward<V>(value)},
+                     *Leaf::ptr_at(new_leaf, leaf_index));
+      return rewrite_branch_path(path, hash, new_leaf, new_leaf);
     }
     return finish_insert(hash, path, item_type{std::forward<K>(key), std::forward<V>(value)});
   }

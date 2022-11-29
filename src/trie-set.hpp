@@ -219,6 +219,14 @@ public:
   }
   constexpr void insert(std::initializer_list<item_type> ilist) { set_.insert(ilist); }
 
+  // template <typename V> constexpr bool insert_or_assign(const key_type& key, V&& value) {
+  //   return set_.insert_or_assign(key, std::forward<V>(value));
+  // }
+
+  // template <typename K, typename V> constexpr bool insert_or_assign(K&& key, V&& value) {
+  //   return set_.insert_or_assign(std::forward<K>(key), std::forward<V>(value));
+  // }
+
   template <class... Args> constexpr bool emplace(Args&&... args) {
     return set_.emplace(std::forward<Args>(args)...);
   }

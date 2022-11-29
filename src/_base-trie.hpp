@@ -115,8 +115,10 @@ public:
   }
 
   constexpr bool insert(const item_type& value) { return insert_(value); }
-  constexpr bool insert(item_type&& value) { return insert_(std::move(value)); }
-  template <class InputIt> constexpr void insert(InputIt first, InputIt last) {
+
+  template <typename P> constexpr bool insert(P&& value) { return insert_(std::move(value)); }
+
+  template <typename InputIt> constexpr void insert(InputIt first, InputIt last) {
     while (first != last) {
       insert_(*first);
       ++first;
@@ -127,7 +129,12 @@ public:
       insert_(std::move(item));
   }
 
-  template <class... Args> constexpr bool emplace(Args&&... args) {
+  template <typename P> constexpr bool insert_or_assign(const key_type& key, P&& value) {
+    assert(IsMap); // only makes sense for maps
+    return false;
+  }
+
+  template <typename... Args> constexpr bool emplace(Args&&... args) {
     return insert(item_type{std::forward<Args>(args)...});
   }
 

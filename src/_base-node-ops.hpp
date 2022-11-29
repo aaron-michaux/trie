@@ -104,7 +104,7 @@ struct LeafNodeOps : public BaseNodeOps<T, IsThreadSafe, false> {
   using node_size_type = typename Base::node_size_type;
   using ref_count_type = typename Base::ref_count_type;
 
-  static constexpr void copy_one(const item_type& src, item_type* dst) {
+  template <typename P> static constexpr void copy_one(const P& src, item_type* dst) {
     if constexpr (std::is_trivial<item_type>::value) {
       std::memcpy(dst, &src, sizeof(item_type));
     } else {
@@ -115,7 +115,7 @@ struct LeafNodeOps : public BaseNodeOps<T, IsThreadSafe, false> {
 
   static constexpr void initialize_one(const item_type& src, item_type* dst) { copy_one(src, dst); }
 
-  static constexpr void initialize_one(item_type&& src, item_type* dst) {
+  template <typename P> static constexpr void initialize_one(P&& src, item_type* dst) {
     if constexpr (std::is_move_constructible<item_type>::value) {
       new (dst) item_type{std::move(src)};
     } else if constexpr (std::is_default_constructible<item_type>::value &&
@@ -145,9 +145,9 @@ struct LeafNodeOps : public BaseNodeOps<T, IsThreadSafe, false> {
     return ptr;
   }
 
-  static constexpr node_ptr_type make(item_type&& value) {
+  template <typename P> static constexpr node_ptr_type make(P&& value) {
     auto* ptr = Base::make_uninitialized(1, 1);
-    initialize_one(std::move(value), Base::ptr_at(ptr, 0));
+    initialize_one(std::forward<P>(value), Base::ptr_at(ptr, 0));
     return ptr;
   }
 

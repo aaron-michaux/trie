@@ -139,20 +139,20 @@ public:
   }
 
   constexpr std::optional<item_type> extract(const key_type& key) {
-    auto result = find(key);
-    erase(key);
-    return result;
+    auto* opt = find(key);
+    if (opt != nullptr) {
+      // move-construct
+      auto result = std::optional<item_type>{std::move(const_cast<item_type*>(*opt))};
+      erase(key);
+      return result;
+    }
+    return {};
   }
   //@}
 
   //@{ Lookup
   constexpr std::size_t count(const key_type& key) const { return contains(key); }
-  constexpr std::optional<item_type> find(const key_type& key) const {
-    auto* ptr = Ops::find(root_, key);
-    if (ptr != nullptr)
-      return {*ptr};
-    return {};
-  }
+  constexpr const item_type* find(const key_type& key) const { return Ops::find(root_, key); }
   constexpr bool contains(const key_type& key) const { return Ops::find(root_, key) != nullptr; }
   //@}
 

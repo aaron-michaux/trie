@@ -10,8 +10,10 @@ template <typename NodeOps, bool is_const_reference> class Iterator {
 public:
   using iterator_category = std::bidirectional_iterator_tag;
   using item_type = typename NodeOps::item_type;
-  using reference_type = std::conditional<is_const_reference, const item_type&, item_type&>::type;
-  using pointer_type = std::conditional<is_const_reference, const item_type*, item_type*>::type;
+  using reference_type =
+      typename std::conditional<is_const_reference, const item_type&, item_type&>::type;
+  using pointer_type =
+      typename std::conditional<is_const_reference, const item_type*, item_type*>::type;
   using node_type = typename NodeOps::node_type;
   using node_ptr_type = node_type*;
   using node_const_ptr_type = const node_type*;
@@ -61,8 +63,8 @@ public:
   }
 
   constexpr Iterator operator++(int) {
-    Iterator tmp = *this;
-    ++(*this);
+    Iterator tmp{*this};
+    increment_();
     return tmp;
   }
 

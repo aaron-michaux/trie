@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <array>
 #include <algorithm>
 #include <atomic>
 #include <bit>
@@ -8,6 +9,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <type_traits>
 
 #include <cstdint>
@@ -26,8 +28,6 @@ constexpr uint8_t branch_free_popcount(uint32_t x) {
   x = (x & 0x33333333u) + ((x >> 2) & 0x33333333u);
   return static_cast<uint8_t>(((x + (x >> 4) & 0x0f0f0f0fu) * 0x01010101u) >> 24);
 }
-
-constexpr uintptr_t cast_pointer(const void* ptr) { return std::bit_cast<uintptr_t>(ptr); }
 
 /**
  * @return The number of bits in 'x' with value 1

@@ -113,7 +113,7 @@ template <typename Tag, typename Tag::type p> typename rob<Tag, p>::filler rob<T
 
 template <typename T> struct Bf { using type = detail::NodeData<T::is_thread_safe>* (T::*)(); };
 
-template class rob<Bf<ItemSetType>, &ItemSetType::get_root_>;
+template struct rob<Bf<ItemSetType>, &ItemSetType::get_root_>;
 template <typename T> auto get_root1(T& trie) { return (trie.*result<Bf<T>>::ptr)(); }
 
 auto get_root(auto& trie) { return get_root1(*reinterpret_cast<ItemSetType*>(&trie)); }
@@ -224,7 +224,7 @@ void check_trie_invariants(typename NodeOps::node_type* root, std::size_t tree_s
   // for_each_leaf<NodeOps>(root, check_leaf);
 
   // If a branch node has a single child, it must be another branch node
-  auto check_node = [root, &check_leaf](node_type_ptr node) {
+  auto check_node = [&check_leaf](node_type_ptr node) {
     if (NodeOps::type(node) == detail::NodeType::Leaf) {
       check_leaf(node);
     } else {
@@ -300,8 +300,7 @@ void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
     auto end = set.cend();
     ++end;
     for (auto ii = end; ii != set.cbegin();) {
-      --ii;
-      CATCH_REQUIRE(is_value((*ii).value()));
+      CATCH_REQUIRE(is_value((*--ii).value()));
       ++counter;
     }
     CATCH_REQUIRE(counter == values.size());
@@ -312,6 +311,25 @@ void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
     auto start = set.cbegin();
     --start; // start should now be end!
     CATCH_REQUIRE(start == set.cend());
+  }
+
+  { // Test postincrement
+    std::size_t counter = 0;
+    for (auto ii = set.cbegin(); ii != set.cend();) {
+      CATCH_REQUIRE(is_value((*ii++).value()));
+      ++counter;
+    }
+    CATCH_REQUIRE(counter == values.size());
+  }
+
+  { // Test postdecrement
+    std::size_t counter = 0;
+    for (auto ii = set.end(); ii != set.begin();) {
+      ii--;
+      CATCH_REQUIRE(is_value((*ii).value()));
+      ++counter;
+    }
+    CATCH_REQUIRE(counter == values.size());
   }
 }
 
@@ -688,13 +706,145 @@ template <typename SetType> void trie_ops_test() {
     }
   }
 
-  // CATCH_REQUIRE(counter == 0);
+  CATCH_REQUIRE(counter == 0);
 }
 
 CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
   trie_ops_test<TracedItemSetType>();
   trie_ops_test<MoveTracedItemSetType>();
   trie_ops_test<TrivialTracedItemSetType>();
+}
+
+CATCH_TEST_CASE("trie_default_construct", "[trie_default_construct]") {
+  using set_type = persistent_set<TracedItem>;
+  auto set = std::make_unique<set_type>();
+  CATCH_REQUIRE(set->size() == 0);
+}
+
+CATCH_TEST_CASE("trie_insert", "[trie_insert]") {
+  using set_type = persistent_set<int>;
+  std::vector<int> values{{1, 2, 3}};
+  set_type set{std::begin(values), std::end(values)};
+  CATCH_REQUIRE(set.size() == values.size());
+  for (auto value : values)
+    CATCH_REQUIRE(set.contains(value));
+  set.clear();
+  CATCH_REQUIRE(set.size() == 0);
+
+  set.insert(std::begin(values), std::end(values));
+  CATCH_REQUIRE(set.size() == values.size());
+  for (auto value : values)
+    CATCH_REQUIRE(set.contains(value));
+
+  CATCH_REQUIRE(set.insert(3) == false);
+  CATCH_REQUIRE(set.insert(4) == true);
+  CATCH_REQUIRE(set.contains(4));
+  CATCH_REQUIRE(set.size() == 4);
+
+  set.insert({4, 5, 6});
+  CATCH_REQUIRE(set.size() == 6);
+
+  CATCH_REQUIRE(set.emplace(7));
+  CATCH_REQUIRE(set.size() == 7);
+}
+
+CATCH_TEST_CASE("trie_insert_const_ref", "[trie_insert_const_ref]") {
+  using set_type = persistent_set<TracedItem, TracedItem::Hasher>;
+  uint32_t counter = 0;
+  {
+    set_type set;
+    TracedItem item{counter, 1};
+    set.insert(item);
+    CATCH_REQUIRE(set.size() == 1);
+  }
+  CATCH_REQUIRE(counter == 0);
+}
+
+CATCH_TEST_CASE("trie_extract", "[trie_extract]") {
+  using set_type = persistent_set<int>;
+  set_type set{{1, 2, 3}};
+  auto x = set.extract(2);
+  auto y = set.extract(2);
+
+  CATCH_REQUIRE(x.has_value());
+  CATCH_REQUIRE(!y.has_value());
+  CATCH_REQUIRE(*x == 2);
+}
+
+CATCH_TEST_CASE("trie_ilist", "[trie_ilist]") {
+  using set_type = persistent_set<int>;
+  std::vector<int> values{{1, 2, 3}};
+  set_type set{{1, 2, 3}};
+  CATCH_REQUIRE(set.size() == values.size());
+  for (auto value : values)
+    CATCH_REQUIRE(set.contains(value));
+}
+
+CATCH_TEST_CASE("trie_op=", "[trie_op=]") {
+  using set_type = persistent_set<int>;
+  set_type set{{1, 2, 3}};
+  set_type other;
+  CATCH_REQUIRE(other.size() == 0);
+  other = set;
+  CATCH_REQUIRE(other.size() == set.size());
+  for (auto value : set)
+    CATCH_REQUIRE(other.contains(value));
+  set.erase(2);
+  CATCH_REQUIRE(!set.contains(2));
+  CATCH_REQUIRE(other.contains(2));
+}
+
+CATCH_TEST_CASE("trie_op==", "[trie_op==]") {
+  using set_type = persistent_set<int>;
+  set_type set{{1, 2, 3}};
+  set_type other;
+  CATCH_REQUIRE(set == set);
+  CATCH_REQUIRE(other == other);
+  CATCH_REQUIRE(set != other);
+  CATCH_REQUIRE(other != set);
+  set = other;
+  CATCH_REQUIRE(other == set);
+}
+
+CATCH_TEST_CASE("trie_swap", "[trie_swap]") {
+  using set_type = persistent_set<int>;
+  set_type set{{1, 2, 3}};
+  set_type other;
+
+  CATCH_REQUIRE(other.size() == 0);
+  other.swap(other);
+  CATCH_REQUIRE(other.size() == 0);
+
+  CATCH_REQUIRE(set.size() == 3);
+  set.swap(set);
+  CATCH_REQUIRE(set.size() == 3);
+
+  set.swap(other);
+  CATCH_REQUIRE(set.size() == 0);
+  CATCH_REQUIRE(other.size() == 3);
+
+  using std::swap;
+  swap(set, other);
+  CATCH_REQUIRE(set.size() == 3);
+  CATCH_REQUIRE(other.size() == 0);
+}
+
+CATCH_TEST_CASE("trie_hash_func", "[trie_hash_func]") {
+  using set_type = persistent_set<int>;
+  auto func = set_type::hasher{};
+  CATCH_REQUIRE(set_type::hash_function()(1) == func(1));
+}
+
+CATCH_TEST_CASE("trie_key_eq_func", "[trie_key_eq_func]") {
+  using set_type = persistent_set<int>;
+  CATCH_REQUIRE(set_type::key_eq()(1, 1));
+  CATCH_REQUIRE(!set_type::key_eq()(1, 2));
+}
+
+CATCH_TEST_CASE("trie_map", "[trie_map]") {
+  //  using map_type = persistent_map<std::string, TracedItem>;
+
+  // map_type map;
 }
 
 } // namespace niggly::trie::test

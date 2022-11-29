@@ -152,7 +152,7 @@ public:
     auto* opt = find(key);
     if (opt != nullptr) {
       // move-construct
-      auto result = std::optional<item_type>{std::move(const_cast<item_type*>(*opt))};
+      auto result = std::optional<item_type>{std::move(const_cast<item_type&>(*opt))};
       erase(key);
       return result;
     }

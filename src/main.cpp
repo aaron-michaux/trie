@@ -45,7 +45,7 @@ T profileThunk(ThunkType thunk, Args... args) {
  */
 template <typename ChronoType, typename FunctionType, typename... Args>
 auto profile(FunctionType function, Args... args) {
-  using R = std::invoke_result<FunctionType, Args...>::type;
+  using R = typename std::invoke_result<FunctionType, Args...>::type;
   const auto reference = tick();
   if constexpr (std::is_same<R, void>::value) {
     function(std::forward<Args>(args)...);

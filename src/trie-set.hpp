@@ -242,7 +242,7 @@ public:
   constexpr const value_type& operator[](const key_type& key) const {
     auto* value = at(key);
     if (value == nullptr)
-      throw std::out_of_range{};
+      throw std::out_of_range{"index out of range"};
     return *value;
   }
 

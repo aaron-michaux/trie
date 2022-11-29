@@ -41,8 +41,6 @@ template <typename T, bool IsThreadSafe = true, bool IsBranchNode = false> struc
     return (size == 0) ? MinStorageSize : offset() + LogicalSize * size;
   }
 
-  static constexpr NodeType type(node_const_ptr_type node) { return node->type(); }
-
   static constexpr std::size_t size(node_const_ptr_type node) {
     if constexpr (IsBranchNode) {
       return popcount(node->payload_);

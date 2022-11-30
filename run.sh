@@ -57,6 +57,7 @@ show_usage()
       example       build the examples
       test          build and run test cases
       coverage      build and run test cases with text code-coverage output
+      coveragehtml  build and run test cases with html code-coverage output
 
    Examples:
 
@@ -109,8 +110,10 @@ while [ "$#" -gt "0" ] ; do
     [ "$1" = "test" ]      && BUILD_TESTS="1"  && BUILD_EXAMPLES=1 && shift && continue
     [ "$1" = "bench" ]     && BENCHMARK=1      && shift && continue
     [ "$1" = "examples" ]  && BUILD_EXAMPLES=1 && shift && continue
-    [ "$1" = "coverage" ]  && RULE="coverage_html"  \
-        && BUILD_TESTS=1 && COVERAGE_HTML=1 && CONFIG=debug && shift && continue
+    [ "$1" = "coverage" ]  && RULE="coverage"  \
+        && BUILD_TESTS=1 && COVERAGE=1 && COVERAGE_HTML=0 && CONFIG=debug && shift && continue
+    [ "$1" = "coveragehtml" ]  && RULE="coverage_html"  \
+        && BUILD_TESTS=1 && COVERAGE=0 && COVERAGE_HTML=1 && CONFIG=debug && shift && continue
 
     [ "$1" = "-h" ] || [ "$1" = "--help" ] && show_usage && exit 0
     

@@ -2,21 +2,20 @@
 # HAMT Persistent Set and Map
 
 
-A thread-safe persistent HAMT ([Hash Array Mapped Trie](https://idea.popcount.org/2012-07-25-introduction-to-hamt/)) for C++, inspired by [Phil Nash's hash trie](https://github.com/philsquared/hash_trie).
+A HAMT ([Hash Array Mapped Trie](https://idea.popcount.org/2012-07-25-introduction-to-hamt/)) for C++, with thread-safe implementations of `persistent_set` and `persistent_map`.
+Inspired by [Phil Nash's hash trie](https://github.com/philsquared/hash_trie).
 
 This is a tested rewrite that uses less memory, and is careful about object alignment.
-
-and correctly handles the alignment of contained objects.
 
 ## Platform/Tested
  
  * Linux-x86_64 with gcc-12 and clang-14
  * Comprehensive testing
- * Asan, usan and tsan clean.
+ * Asan, ubsan and tsan clean.
  
 ## Deficiencies
 
- * Containers are not Allocator aware.
+Containers are not Allocator aware. I used `std::aligned_alloc` and `std::free` to manage allocation.
 
 ## More information
 

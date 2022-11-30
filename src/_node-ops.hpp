@@ -418,10 +418,12 @@ struct NodeOps {
     const auto leaf_index = get_index_in_leaf(path.leaf_end, key);
 
     if (leaf_index != NotAnIndex) { // Duplicate, so overwrite node
-      auto new_leaf = Leaf::duplicate_leaf(path.leaf_end, leaf_index);
-      Leaf::copy_one(item_type{std::forward<K>(key), std::forward<V>(value)},
-                     *Leaf::ptr_at(new_leaf, leaf_index));
-      return rewrite_branch_path(path, hash, new_leaf, new_leaf);
+      auto new_leaf = Leaf::duplicate_leaf_with_overwrite(
+          path.leaf_end, leaf_index, item_type{std::forward<K>(key), std::forward<V>(value)});
+      auto ret = rewrite_branch_path(path, hash, new_leaf, new_leaf);
+      if (path.size > 0)
+        dec_ref(path.leaf_end); // rewrite_branch_path doesn't know to let this node go
+      return ret;
     }
     return finish_insert(hash, path, item_type{std::forward<K>(key), std::forward<V>(value)});
   }
@@ -429,21 +431,16 @@ struct NodeOps {
   template <typename ItemType>
   static constexpr node_ptr_type finish_insert(hash_type hash, const TreePath& path,
                                                ItemType&& item) {
-    node_ptr_type new_root = nullptr;
     if (path.leaf_end == nullptr) {
       auto new_leaf = Leaf::make(std::forward<ItemType>(item));
-      new_root = rewrite_branch_path(path, hash, new_leaf, new_leaf);
-
-    } else {
-      auto [new_branch, leaf_end] =
-          branch_to_leaves(hash,                          // Hash of the value
-                           path.size,                     // The path starts here
-                           path.leaf_end,                 // Includes this node
-                           std::forward<ItemType>(item)); // Must include this new value
-      new_root = rewrite_branch_path(path, hash, new_branch, leaf_end);
+      return rewrite_branch_path(path, hash, new_leaf, new_leaf);
     }
-
-    return new_root;
+    auto [new_branch, leaf_end] =
+        branch_to_leaves(hash,                          // Hash of the value
+                         path.size,                     // The path starts here
+                         path.leaf_end,                 // Includes this node
+                         std::forward<ItemType>(item)); // Must include this new value
+    return rewrite_branch_path(path, hash, new_branch, leaf_end);
   }
 
   static constexpr const item_type* find(node_const_ptr_type root, const key_type& key) {

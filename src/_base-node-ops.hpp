@@ -3,6 +3,9 @@
 
 #include "_node-data.hpp"
 
+#include <fmt/format.h>
+#include <iostream>
+
 namespace niggly::trie::detail {
 
 // ------------------------------------------------------------------------------------- BaseNodeOps
@@ -153,7 +156,6 @@ struct LeafNodeOps : public BaseNodeOps<T, IsThreadSafe, false> {
    * Duplicates a leaf node, optionally omitting the value at `index_to_skip`
    */
   static constexpr node_ptr_type duplicate_leaf(node_const_ptr_type node, uint32_t index_to_skip) {
-    assert(node->type() == NodeType::Leaf); // and this too
     const auto sz = Base::size(node);
     node_ptr_type new_node = nullptr;
     if (index_to_skip < sz) {
@@ -171,14 +173,34 @@ struct LeafNodeOps : public BaseNodeOps<T, IsThreadSafe, false> {
   }
 
   /**
+   * Duplicates a leaf node, overwrite a value
+   */
+  template <typename Item>
+  static constexpr node_ptr_type duplicate_leaf_with_overwrite(node_const_ptr_type node,
+                                                               uint32_t index_to_overwrite,
+                                                               Item&& item) {
+    const auto sz = Base::size(node);
+    assert(index_to_overwrite < sz);
+    node_ptr_type new_node = Base::make_uninitialized(sz, sz);
+    for (auto index = 0u; index != sz; ++index) {
+      if (index == index_to_overwrite) {
+        copy_one(std::forward<Item>(item), Base::ptr_at(new_node, index));
+      } else {
+        copy_one(*Base::ptr_at(node, index), Base::ptr_at(new_node, index));
+      }
+    }
+    return new_node;
+  }
+
+  /**
    * Creates a new leaf node, with values copied, and `value` at the end
    */
-  template <typename Value>
-  static constexpr node_ptr_type copy_append(node_const_ptr_type src, Value&& value) {
+  template <typename Item>
+  static constexpr node_ptr_type copy_append(node_const_ptr_type src, Item&& item) {
     const auto sz = Base::size(src);
     auto new_node = Base::make_uninitialized(sz + 1, sz + 1);
     copy_payload_to(src, new_node);
-    initialize_one(std::forward<Value>(value), Base::ptr_at(new_node, sz));
+    initialize_one(std::forward<Item>(item), Base::ptr_at(new_node, sz));
     return new_node;
   }
 };

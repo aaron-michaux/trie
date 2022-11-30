@@ -175,6 +175,10 @@ void dot_graph(const char* filename, typename NodeOps::node_type* root) {
       }
     }
   });
+  if (NodeOps::type(root) == NodeType::Leaf) {
+    out << fmt::format("   {}\n", node_name(root));
+  }
+
   out << "}\n";
   out.close();
 }
@@ -1075,6 +1079,96 @@ CATCH_TEST_CASE("trie_map_erase_if", "[trie_map_erase_if]") {
   erase_if(map, predicate);
   CATCH_REQUIRE(map.size() == 2);
   CATCH_REQUIRE(map == other);
+}
+
+CATCH_TEST_CASE("trie_map_emplace_extract", "[trie_map_emplace_extract]") {
+  using map_type = persistent_map<int, TracedItem>;
+  uint32_t counter = 0;
+  {
+    map_type map;
+    CATCH_REQUIRE(map.emplace(0, TracedItem{counter, 1}));
+    CATCH_REQUIRE(map.contains(0));
+
+    auto opt = map.extract(0);
+    CATCH_REQUIRE(opt.has_value());
+    CATCH_REQUIRE(opt->second.value() == 1);
+    CATCH_REQUIRE(!map.contains(0));
+
+    auto other = map.extract(1);
+    CATCH_REQUIRE(!other.has_value());
+  }
+  CATCH_REQUIRE(counter == 0);
+}
+
+CATCH_TEST_CASE("trie_map_insert_or_assign", "[trie_map_insert_or_assign]") {
+  using map_type = persistent_map<int, TracedItem>;
+
+  using NodeOps =
+      detail::NodeOps<int, TracedItem, TracedItem::Hasher, std::equal_to<int>, true, true>;
+
+  uint32_t counter = 0;
+  {
+    map_type map{{{10, TracedItem{counter, 1}}}};
+    CATCH_REQUIRE(map.contains(10));
+    CATCH_REQUIRE(map[10].value() == 1);
+
+    dot_graph<NodeOps>("/tmp/map_0.dot", private_hack::get_root(map));
+
+    auto b = TracedItem{counter, 2};
+    auto c = TracedItem{counter, 3};
+
+    CATCH_REQUIRE(map.insert_or_assign(1, b));
+    CATCH_REQUIRE(map.contains(1));
+    CATCH_REQUIRE(map[1].value() == 2);
+
+    dot_graph<NodeOps>("/tmp/map_1.dot", private_hack::get_root(map));
+
+    if (false) {
+      CATCH_REQUIRE(!map.insert({10, c}));
+      CATCH_REQUIRE(map.contains(10));
+      CATCH_REQUIRE(map[10].value() == 1);
+    }
+
+    auto ret = map.insert_or_assign(10, c);
+
+    dot_graph<NodeOps>("/tmp/map_2.dot", private_hack::get_root(map));
+
+    CATCH_REQUIRE(ret);
+    CATCH_REQUIRE(map.contains(10));
+    CATCH_REQUIRE(map[10].value() == 3);
+  }
+  CATCH_REQUIRE(counter == 0);
+}
+
+CATCH_TEST_CASE("trie_map_insert_or_assign_with_move", "[trie_map_insert_or_assign_with_move]") {
+  using map_type = persistent_map<int, std::string>;
+  uint32_t counter = 0;
+  {
+    map_type map{{{0, "a"s}}};
+    CATCH_REQUIRE(map.contains(0));
+    CATCH_REQUIRE(map[0] == "a"s);
+
+    auto b = "b"s;
+    CATCH_REQUIRE(map.insert_or_assign(0, std::move(b)));
+    CATCH_REQUIRE(b.size() == 0);
+    CATCH_REQUIRE(map.contains(0));
+    CATCH_REQUIRE(map[0] == "b"s);
+  }
+}
+
+CATCH_TEST_CASE("trie_map_insert_or_assign_cref_key", "[trie_map_insert_or_assign_cref_key]") {
+  using map_type = persistent_map<std::string, std::string>;
+  map_type map{{{"A"s, "a"s}}};
+  CATCH_REQUIRE(map.contains("A"s));
+  CATCH_REQUIRE(map["A"s] == "a"s);
+
+  auto key = "B"s;
+  auto b = "b"s;
+  CATCH_REQUIRE(map.insert_or_assign(key, std::move(b)));
+  CATCH_REQUIRE(key.size() != 0);
+  CATCH_REQUIRE(b.size() == 0);
+  CATCH_REQUIRE(map.contains(key));
+  CATCH_REQUIRE(map[key] == "b"s);
 }
 
 CATCH_TEST_CASE("trie_map_hash_func", "[trie_map_hash_func]") {

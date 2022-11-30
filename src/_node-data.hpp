@@ -6,7 +6,6 @@
 #include <atomic>
 #include <bit>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -16,6 +15,9 @@
 #include <cstring>
 #include <cassert>
 #include <cstdlib>
+
+#include <iostream>
+#include <fmt/format.h>
 
 namespace niggly::trie::detail {
 

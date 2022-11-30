@@ -68,11 +68,6 @@ struct NodeOps {
     return (node->type() == NodeType::Branch) ? Branch::size(node) : Leaf::size(node);
   }
 
-  static constexpr bool is_valid_index(node_const_ptr_type node) {
-    return (node->type() == NodeType::Branch) ? Branch::is_valid_index(node)
-                                              : Leaf::is_valid_index(node);
-  }
-
   static constexpr hash_type hash(node_const_ptr_type node) {
     assert(node != nullptr);
     assert(node->type() == NodeType::Leaf);

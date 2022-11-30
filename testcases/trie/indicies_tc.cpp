@@ -1103,39 +1103,75 @@ CATCH_TEST_CASE("trie_map_emplace_extract", "[trie_map_emplace_extract]") {
 CATCH_TEST_CASE("trie_map_insert_or_assign", "[trie_map_insert_or_assign]") {
   using map_type = persistent_map<int, TracedItem>;
 
-  using NodeOps =
-      detail::NodeOps<int, TracedItem, TracedItem::Hasher, std::equal_to<int>, true, true>;
-
   uint32_t counter = 0;
   {
-    map_type map{{{10, TracedItem{counter, 1}}}};
+    map_type map;
+    CATCH_REQUIRE(map.insert_or_assign(10, TracedItem{counter, 1}));
     CATCH_REQUIRE(map.contains(10));
     CATCH_REQUIRE(map[10].value() == 1);
 
-    dot_graph<NodeOps>("/tmp/map_0.dot", private_hack::get_root(map));
-
     auto b = TracedItem{counter, 2};
     auto c = TracedItem{counter, 3};
+    auto d = TracedItem{counter, 4};
 
     CATCH_REQUIRE(map.insert_or_assign(1, b));
     CATCH_REQUIRE(map.contains(1));
     CATCH_REQUIRE(map[1].value() == 2);
 
-    dot_graph<NodeOps>("/tmp/map_1.dot", private_hack::get_root(map));
+    CATCH_REQUIRE(!map.insert({10, c}));
+    CATCH_REQUIRE(map.contains(10));
+    CATCH_REQUIRE(map[10].value() == 1);
 
-    if (false) {
-      CATCH_REQUIRE(!map.insert({10, c}));
-      CATCH_REQUIRE(map.contains(10));
-      CATCH_REQUIRE(map[10].value() == 1);
-    }
-
-    auto ret = map.insert_or_assign(10, c);
-
-    dot_graph<NodeOps>("/tmp/map_2.dot", private_hack::get_root(map));
-
-    CATCH_REQUIRE(ret);
+    CATCH_REQUIRE(map.insert_or_assign(10, c));
     CATCH_REQUIRE(map.contains(10));
     CATCH_REQUIRE(map[10].value() == 3);
+  }
+  CATCH_REQUIRE(counter == 0);
+}
+
+CATCH_TEST_CASE("trie_map_insert_or_assign_traced_key", "[trie_map_insert_or_assign_traced_key]") {
+  using map_type = persistent_map<TracedItem, TracedItem, TracedItem::Hasher>;
+
+  const auto rollover = static_cast<std::size_t>(std::numeric_limits<uint32_t>::max()) + 1;
+
+  uint32_t counter = 0;
+
+  {
+    auto a = TracedItem{counter, 1};
+    auto b = TracedItem{counter, 2};
+    auto c = TracedItem{counter, 3};
+    auto d = TracedItem{counter, 4};
+    auto e = TracedItem{counter, 5};
+    auto a_plus = TracedItem{counter, a.value() + rollover};
+    CATCH_REQUIRE(map_type::hash_function()(a) == map_type::hash_function()(a_plus));
+
+    map_type map;
+    CATCH_REQUIRE(map.insert_or_assign(TracedItem{counter, 10}, a));
+    CATCH_REQUIRE(map.contains(TracedItem{counter, 10}));
+    CATCH_REQUIRE(map[TracedItem{counter, 10}].value() == a.value());
+
+    CATCH_REQUIRE(map.insert_or_assign(TracedItem{counter, 20}, a_plus));
+    CATCH_REQUIRE(map.contains(TracedItem{counter, 20}));
+    CATCH_REQUIRE(map[TracedItem{counter, 20}].value() == a_plus.value());
+
+    CATCH_REQUIRE(map.insert_or_assign(TracedItem{counter, 10}, b));
+    CATCH_REQUIRE(map.contains(TracedItem{counter, 10}));
+    CATCH_REQUIRE(map[TracedItem{counter, 10}].value() == b.value());
+
+    CATCH_REQUIRE(map.insert_or_assign(TracedItem{counter, 10 + rollover}, c));
+    CATCH_REQUIRE(map.contains(TracedItem{counter, 10 + rollover}));
+    CATCH_REQUIRE(map[TracedItem{counter, 10 + rollover}].value() == c.value());
+
+    CATCH_REQUIRE(map.insert_or_assign(TracedItem{counter, 10 + 2 * rollover}, d));
+    CATCH_REQUIRE(map.contains(TracedItem{counter, 10 + 2 * rollover}));
+
+    CATCH_REQUIRE(map.insert_or_assign(TracedItem{counter, 10 + rollover}, e));
+    CATCH_REQUIRE(map.contains(TracedItem{counter, 10 + rollover}));
+
+    CATCH_REQUIRE(map[TracedItem{counter, 20}].value() == a_plus.value());
+    CATCH_REQUIRE(map[TracedItem{counter, 10}].value() == b.value());
+    CATCH_REQUIRE(map[TracedItem{counter, 10 + rollover}].value() == e.value());
+    CATCH_REQUIRE(map[TracedItem{counter, 10 + 2 * rollover}].value() == d.value());
   }
   CATCH_REQUIRE(counter == 0);
 }
@@ -1181,6 +1217,29 @@ CATCH_TEST_CASE("trie_map_key_eq_func", "[trie_map_key_eq_func]") {
   using map_type = persistent_map<int, int>;
   CATCH_REQUIRE(map_type::key_eq()(1, 1));
   CATCH_REQUIRE(!map_type::key_eq()(1, 2));
+}
+
+CATCH_TEST_CASE("trie_map_const_iterators", "[trie_map_const_iterators]") {
+  using map_type = persistent_map<int, std::string>;
+  std::vector<map_type::item_type> items{{{0, "a"s}, {1, "b"s}, {2, "c"s}, {3, "d"s}}};
+  map_type map{std::begin(items), std::end(items)};
+  CATCH_REQUIRE(map.size() == 4);
+
+  auto is_in = [&items](int key) {
+    return std::find_if(std::begin(items), std::end(items),
+                        [key](const auto& item) { return item.first == key; }) != std::end(items);
+  };
+
+  const auto& map_ref = map;
+  for (auto [key, value] : map_ref) {
+    CATCH_REQUIRE(is_in(key));
+    CATCH_REQUIRE(map[key] == value);
+  }
+
+  for (auto ii = map.cbegin(); ii != map.cend(); ++ii) {
+    CATCH_REQUIRE(is_in(ii->first));
+    CATCH_REQUIRE(map[ii->first] == ii->second);
+  }
 }
 
 } // namespace niggly::trie::test

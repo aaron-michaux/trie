@@ -10,7 +10,7 @@
 #include <iostream>
 #include <vector>
 
-namespace niggly::trie::test {
+namespace niggly::test {
 
 using namespace std::string_literals;
 
@@ -94,10 +94,10 @@ using TracedItemSetType = persistent_set<TracedItem, TracedItem::Hasher>;
 using MoveTracedItemSetType = persistent_set<MoveTracedItem, MoveTracedItem::Hasher>;
 using TrivialTracedItemSetType = persistent_set<TrivialTracedItem, TrivialTracedItem::Hasher>;
 
-using ItemSetType =
-    detail::base_set<typename TracedItemSetType::item_type, typename TracedItemSetType::item_type,
-                     typename TracedItemSetType::hasher, typename TracedItemSetType::key_equal,
-                     false, TracedItemSetType::is_thread_safe>;
+using ItemSetType = detail::trie::base_set<
+    typename TracedItemSetType::item_type, typename TracedItemSetType::item_type,
+    typename TracedItemSetType::hasher, typename TracedItemSetType::key_equal, false,
+    TracedItemSetType::is_thread_safe>;
 
 namespace private_hack {
 template <typename Tag> struct result {
@@ -114,7 +114,9 @@ template <typename Tag, typename Tag::type p> struct rob : result<Tag> {
 };
 template <typename Tag, typename Tag::type p> typename rob<Tag, p>::filler rob<Tag, p>::filler_obj;
 
-template <typename T> struct Bf { using type = detail::NodeData<T::is_thread_safe>* (T::*)(); };
+template <typename T> struct Bf {
+  using type = detail::trie::NodeData<T::is_thread_safe>* (T::*)();
+};
 
 template struct rob<Bf<ItemSetType>, &ItemSetType::get_root_>;
 template <typename T> auto get_root1(T& trie) { return (trie.*result<Bf<T>>::ptr)(); }
@@ -125,7 +127,7 @@ auto get_root(auto& trie) { return get_root1(*reinterpret_cast<ItemSetType*>(&tr
 
 template <typename NodeOps, typename Function>
 void for_each_node(typename NodeOps::node_type* node, Function f) {
-  using NodeType = detail::NodeType;
+  using NodeType = detail::trie::NodeType;
   if (node == nullptr)
     return; // empty
   f(node);
@@ -142,7 +144,7 @@ void for_each_node(typename NodeOps::node_type* node, Function f) {
  */
 template <typename NodeOps, typename Function>
 void for_each_leaf(typename NodeOps::node_type* root, Function f) {
-  using NodeType = detail::NodeType;
+  using NodeType = detail::trie::NodeType;
   for_each_node<NodeOps>(root, [f](typename NodeOps::node_type* node) {
     if (NodeOps::type(node) == NodeType::Leaf)
       f(node);
@@ -154,7 +156,7 @@ void dot_graph(const char* filename, typename NodeOps::node_type* root) {
   if (root == nullptr)
     return;
 
-  using NodeType = detail::NodeType;
+  using NodeType = detail::trie::NodeType;
   auto node_name = [](typename NodeOps::node_type* node) -> std::string {
     return fmt::format("{:c}0x{:08x}{}", (NodeOps::type(node) == NodeType::Branch ? 'B' : 'L'),
                        reinterpret_cast<uintptr_t>(node),
@@ -185,7 +187,7 @@ void dot_graph(const char* filename, typename NodeOps::node_type* root) {
 }
 
 template <typename NodeOps> void check_leaf_invariants(const typename NodeOps::node_type* leaf) {
-  using NodeType = detail::NodeType;
+  using NodeType = detail::trie::NodeType;
   const auto size = NodeOps::size(leaf);
   const auto hasher = typename NodeOps::hasher{};
   const auto is_equal = typename NodeOps::key_equal{};
@@ -219,8 +221,8 @@ void check_trie_invariants(typename NodeOps::node_type* root, std::size_t tree_s
     for (auto i = 0u; i < path.size; ++i) {
       const auto node = path.nodes[i];
       const void* next_node = (i + 1 == path.size) ? path.leaf_end : path.nodes[i + 1];
-      const auto sparse_index = detail::hash_chunk(hash, i);
-      CATCH_REQUIRE(NodeOps::type(node) == detail::NodeType::Branch);
+      const auto sparse_index = detail::trie::hash_chunk(hash, i);
+      CATCH_REQUIRE(NodeOps::type(node) == detail::trie::NodeType::Branch);
       CATCH_REQUIRE(NodeOps::Branch::is_valid_index(node, sparse_index));
       CATCH_REQUIRE(*NodeOps::Branch::ptr_at(node, sparse_index) == next_node);
     }
@@ -232,15 +234,15 @@ void check_trie_invariants(typename NodeOps::node_type* root, std::size_t tree_s
 
   // If a branch node has a single child, it must be another branch node
   auto check_node = [&check_leaf](node_type_ptr node) {
-    if (NodeOps::type(node) == detail::NodeType::Leaf) {
+    if (NodeOps::type(node) == detail::trie::NodeType::Leaf) {
       check_leaf(node);
     } else {
-      CATCH_REQUIRE(NodeOps::type(node) == detail::NodeType::Branch);
+      CATCH_REQUIRE(NodeOps::type(node) == detail::trie::NodeType::Branch);
       CATCH_REQUIRE(NodeOps::size(node) > 0);
       // If the branch-node is size1, then the child must be a branch node
       if (NodeOps::size(node) == 1) {
         node_type_ptr child = *NodeOps::Branch::dense_ptr_at(node, 0);
-        CATCH_REQUIRE(NodeOps::type(child) == detail::NodeType::Branch);
+        CATCH_REQUIRE(NodeOps::type(child) == detail::trie::NodeType::Branch);
       }
     }
   };
@@ -341,16 +343,16 @@ void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
 }
 
 CATCH_TEST_CASE("max_trie_depth", "[max_trie_depth]") {
-  const auto hash_bits = sizeof(std::size_t) * 8;                      // 64 bits
-  const auto chunk_bits = std::size_t{5};                              // 32 fits in 5 bits
-  CATCH_REQUIRE(chunk_bits * (detail::MaxTrieDepth - 0) >= hash_bits); // 5 * 13 = 65
-  CATCH_REQUIRE(chunk_bits * (detail::MaxTrieDepth - 1) < hash_bits);  // 5 * 12 = 60
+  const auto hash_bits = sizeof(std::size_t) * 8;                            // 64 bits
+  const auto chunk_bits = std::size_t{5};                                    // 32 fits in 5 bits
+  CATCH_REQUIRE(chunk_bits * (detail::trie::MaxTrieDepth - 0) >= hash_bits); // 5 * 13 = 65
+  CATCH_REQUIRE(chunk_bits * (detail::trie::MaxTrieDepth - 1) < hash_bits);  // 5 * 12 = 60
 }
 
 CATCH_TEST_CASE("popcount", "[popcount]") {
   auto test_popcount = [](uint32_t x, int count) {
-    CATCH_REQUIRE(detail::popcount(x) == count);
-    CATCH_REQUIRE(detail::branch_free_popcount(x) == count);
+    CATCH_REQUIRE(detail::trie::popcount(x) == count);
+    CATCH_REQUIRE(detail::trie::branch_free_popcount(x) == count);
   };
   test_popcount(0x00000000u, 0);
   test_popcount(0x01010101u, 4);
@@ -362,27 +364,27 @@ CATCH_TEST_CASE("popcount", "[popcount]") {
 CATCH_TEST_CASE("sparse_index", "[sparse_index]") {
   // 4 == 100b
   const uint32_t bitmap = (1u << 0) | (1u << 7) | (1u << 16) | (1u << 22) | (1u << 31);
-  CATCH_REQUIRE(detail::popcount(bitmap) == 5);
-  CATCH_REQUIRE(detail::to_dense_index(0u, bitmap) == 0);
-  CATCH_REQUIRE(detail::to_dense_index(7u, bitmap) == 1);
-  CATCH_REQUIRE(detail::to_dense_index(16u, bitmap) == 2);
-  CATCH_REQUIRE(detail::to_dense_index(22u, bitmap) == 3);
-  CATCH_REQUIRE(detail::to_dense_index(31u, bitmap) == 4);
+  CATCH_REQUIRE(detail::trie::popcount(bitmap) == 5);
+  CATCH_REQUIRE(detail::trie::to_dense_index(0u, bitmap) == 0);
+  CATCH_REQUIRE(detail::trie::to_dense_index(7u, bitmap) == 1);
+  CATCH_REQUIRE(detail::trie::to_dense_index(16u, bitmap) == 2);
+  CATCH_REQUIRE(detail::trie::to_dense_index(22u, bitmap) == 3);
+  CATCH_REQUIRE(detail::trie::to_dense_index(31u, bitmap) == 4);
 
   // This indices are invalid
-  CATCH_REQUIRE(detail::is_valid_index(1u, bitmap) == false);
-  CATCH_REQUIRE(detail::is_valid_index(6u, bitmap) == false);
-  CATCH_REQUIRE(detail::is_valid_index(23u, bitmap) == false);
+  CATCH_REQUIRE(detail::trie::is_valid_index(1u, bitmap) == false);
+  CATCH_REQUIRE(detail::trie::is_valid_index(6u, bitmap) == false);
+  CATCH_REQUIRE(detail::trie::is_valid_index(23u, bitmap) == false);
 
   for (auto i = 0u; i < 32; ++i) {
     const bool is_valid = (i == 0) || (i == 7) || (i == 16) || (i == 22) || (i == 31);
-    CATCH_REQUIRE(detail::is_valid_index(i, bitmap) == is_valid);
+    CATCH_REQUIRE(detail::trie::is_valid_index(i, bitmap) == is_valid);
   }
 }
 
 CATCH_TEST_CASE("node_data_size_alignment", "[node_data_size_alignment]") {
-  using NodeDataTheadSafe = detail::NodeData<true>;
-  using NodeDataVanilla = detail::NodeData<false>;
+  using NodeDataTheadSafe = detail::trie::NodeData<true>;
+  using NodeDataVanilla = detail::trie::NodeData<false>;
   CATCH_REQUIRE(alignof(NodeDataTheadSafe) == alignof(NodeDataVanilla));
   CATCH_REQUIRE(sizeof(NodeDataTheadSafe) == sizeof(NodeDataVanilla));
   CATCH_REQUIRE(sizeof(NodeDataTheadSafe) == 8);
@@ -396,8 +398,8 @@ CATCH_TEST_CASE("node_data_add_dec_ref", "[node_data_add_dec_ref]") {
     CATCH_REQUIRE(node.dec_ref() == 1);
     CATCH_REQUIRE(node.dec_ref() == 0);
   };
-  auto n1 = detail::NodeData<true>{detail::NodeType::Leaf, 0};
-  auto n2 = detail::NodeData<false>{detail::NodeType::Leaf, 0};
+  auto n1 = detail::trie::NodeData<true>{detail::trie::NodeType::Leaf, 0};
+  auto n2 = detail::trie::NodeData<false>{detail::trie::NodeType::Leaf, 0};
 
   test_node(n1);
   test_node(n2);
@@ -405,17 +407,17 @@ CATCH_TEST_CASE("node_data_add_dec_ref", "[node_data_add_dec_ref]") {
 
 CATCH_TEST_CASE("node_type", "[node_type]") {
   {
-    detail::NodeData node{detail::NodeType::Branch, 0};
-    CATCH_REQUIRE(node.type() == detail::NodeType::Branch);
+    detail::trie::NodeData node{detail::trie::NodeType::Branch, 0};
+    CATCH_REQUIRE(node.type() == detail::trie::NodeType::Branch);
   }
   {
-    detail::NodeData node{detail::NodeType::Leaf, 0};
-    CATCH_REQUIRE(node.type() == detail::NodeType::Leaf);
+    detail::trie::NodeData node{detail::trie::NodeType::Leaf, 0};
+    CATCH_REQUIRE(node.type() == detail::trie::NodeType::Leaf);
   }
 }
 
 template <typename T> void test_node_size() {
-  using NodeType = detail::NodeType;
+  using NodeType = detail::trie::NodeType;
   {
     auto node = T::Branch::make_uninitialized(0, 0);
     CATCH_REQUIRE(T::size(node) == 0);
@@ -447,8 +449,8 @@ template <typename T> void test_node_size() {
 }
 
 template <typename T> void test_node_configuration() {
-  test_node_size<detail::NodeOps<T, T, std::hash<T>, std::equal_to<T>, false, true>>();
-  test_node_size<detail::NodeOps<T, T, std::hash<T>, std::equal_to<T>, false, false>>();
+  test_node_size<detail::trie::NodeOps<T, T, std::hash<T>, std::equal_to<T>, false, true>>();
+  test_node_size<detail::trie::NodeOps<T, T, std::hash<T>, std::equal_to<T>, false, false>>();
 }
 
 CATCH_TEST_CASE("node_configuration", "[node_configuration]") {
@@ -479,7 +481,7 @@ CATCH_TEST_CASE("node_configuration", "[node_configuration]") {
 
 CATCH_TEST_CASE("trie_construct_destruct", "[trie_construct_destruct]") {
   uint32_t counter{0}; // Tracks how many times the constructor/destructor is called
-  using Ops = detail::NodeOps<TracedItem, TracedItem>;
+  using Ops = detail::trie::NodeOps<TracedItem, TracedItem>;
 
   { // Constructor should be called 4 times, and same with destructor
     auto* node_ptr = Ops::Leaf::make_uninitialized(4, 4);
@@ -494,21 +496,21 @@ CATCH_TEST_CASE("trie_construct_destruct", "[trie_construct_destruct]") {
 }
 
 CATCH_TEST_CASE("trie_ops_safe_destroy", "[trie_ops_safe_destroy]") {
-  using Ops = detail::NodeOps<TracedItemSetType::item_type, TracedItemSetType::item_type,
-                              TracedItemSetType::hasher, TracedItemSetType::key_equal, false,
-                              TracedItemSetType::is_thread_safe>;
+  using Ops = detail::trie::NodeOps<TracedItemSetType::item_type, TracedItemSetType::item_type,
+                                    TracedItemSetType::hasher, TracedItemSetType::key_equal, false,
+                                    TracedItemSetType::is_thread_safe>;
   Ops::destroy(nullptr); // should not crash
 }
 
 CATCH_TEST_CASE("duplicate_leaf", "[dupcliate_leaf]") {
   uint32_t counter = 0;
 
-  using Ops = detail::NodeOps<TracedItem, TracedItem>;
+  using Ops = detail::trie::NodeOps<TracedItem, TracedItem>;
   using Leaf = Ops::Leaf;
 
   auto* leaf_0 = Leaf::make(TracedItem{counter, 0});
   auto* leaf_1 = Leaf::copy_append(leaf_0, TracedItem{counter, 1});
-  auto* leaf_2 = Leaf::duplicate_leaf(leaf_1, detail::NotAnIndex);
+  auto* leaf_2 = Leaf::duplicate_leaf(leaf_1, detail::trie::NotAnIndex);
 
   CATCH_REQUIRE(Leaf::size(leaf_0) == 1);
   CATCH_REQUIRE(Leaf::size(leaf_1) == 2);
@@ -533,9 +535,9 @@ template <typename SetType> void trie_ops_test() {
   {
     SetType set;
     using ItemType = typename SetType::item_type;
-    using Ops = detail::NodeOps<typename SetType::item_type, typename SetType::item_type,
-                                typename SetType::hasher, typename SetType::key_equal, false,
-                                SetType::is_thread_safe>;
+    using Ops = detail::trie::NodeOps<typename SetType::item_type, typename SetType::item_type,
+                                      typename SetType::hasher, typename SetType::key_equal, false,
+                                      SetType::is_thread_safe>;
 
     // Inserting the following sequence, to test code paths, hash is 32 bits
     // value =   1,         hash = 00|00-000|0 0000-|0000 0|000-00|00 000|0-0001
@@ -1243,4 +1245,4 @@ CATCH_TEST_CASE("trie_map_const_iterators", "[trie_map_const_iterators]") {
   }
 }
 
-} // namespace niggly::trie::test
+} // namespace niggly::test

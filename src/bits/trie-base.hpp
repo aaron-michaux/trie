@@ -17,7 +17,7 @@
 #include <cassert>
 #include <cstdlib>
 
-namespace niggly::trie::detail {
+namespace niggly::detail::trie {
 
 // ---------------------------------------------------------------------------------- Base Functions
 
@@ -188,7 +188,7 @@ template <typename T, bool IsThreadSafe = true, bool IsBranchNode = false> struc
   //@{ Member access
   static constexpr bool is_valid_index(node_const_ptr_type node, node_size_type index) {
     if constexpr (IsBranchNode) {
-      return ::niggly::trie::detail::is_valid_index(index, node->payload_);
+      return ::niggly::detail::trie::is_valid_index(index, node->payload_);
     } else {
       return index < node->payload_;
     }
@@ -726,7 +726,7 @@ struct NodeOps {
           return static_cast<uint32_t>(iterator - start);
       }
     }
-    return detail::NotAnIndex;
+    return detail::trie::NotAnIndex;
   }
 
   static constexpr node_ptr_type erase(node_ptr_type root, const key_type& key) {
@@ -1084,7 +1084,7 @@ template <typename KeyType,                           // The type used for Hash/
           >
 class base_set {
 private:
-  using Ops = detail::NodeOps<KeyType, ValueType, Hash, KeyEqual, IsMap, IsThreadSafe>;
+  using Ops = detail::trie::NodeOps<KeyType, ValueType, Hash, KeyEqual, IsMap, IsThreadSafe>;
   using node_type = typename Ops::node_type;
   using node_ptr_type = typename Ops::node_ptr_type;
   using node_const_ptr_type = typename Ops::node_const_ptr_type;
@@ -1100,8 +1100,8 @@ public:
   using key_equal = KeyEqual;
   using reference = item_type&;
   using const_reference = const item_type&;
-  using iterator = typename detail::Iterator<Ops, false>;
-  using const_iterator = typename detail::Iterator<Ops, true>;
+  using iterator = typename detail::trie::Iterator<Ops, false>;
+  using const_iterator = typename detail::trie::Iterator<Ops, true>;
   static constexpr bool is_map = IsMap;
   static constexpr bool is_thread_safe = IsThreadSafe;
   //@}
@@ -1316,4 +1316,4 @@ private:
   }
 };
 
-} // namespace niggly::trie::detail
+} // namespace niggly::detail::trie

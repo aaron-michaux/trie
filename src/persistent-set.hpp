@@ -3,7 +3,7 @@
 
 #include "bits/trie-base.hpp"
 
-namespace niggly::trie {
+namespace niggly {
 
 // ---------------------------------------------------------------------------------- persistent_set
 
@@ -14,7 +14,7 @@ template <typename ItemType,                           // Type of item to store
           >
 class persistent_set {
 private:
-  using set_type = detail::base_set<ItemType, ItemType, Hash, KeyEqual, false, IsThreadSafe>;
+  using set_type = detail::trie::base_set<ItemType, ItemType, Hash, KeyEqual, false, IsThreadSafe>;
   set_type set_;
 
 public:
@@ -121,4 +121,4 @@ public:
   //@}
 };
 
-} // namespace niggly::trie
+} // namespace niggly

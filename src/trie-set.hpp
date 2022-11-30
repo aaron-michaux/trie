@@ -117,8 +117,8 @@ public:
   //@}
 
   //@{ Observers
-  static constexpr hasher hash_function() { return hasher{}; }
-  static constexpr key_equal key_eq() { return key_equal{}; }
+  static constexpr hasher hash_function() { return set_type::hash_function(); }
+  static constexpr key_equal key_eq() { return set_type::key_eq(); }
   //@}
 
   //@{ Friends
@@ -255,8 +255,8 @@ public:
   //@}
 
   //@{ Observers
-  static constexpr hasher hash_function() { return hasher{}; }
-  static constexpr key_equal key_eq() { return key_equal{}; }
+  static constexpr hasher hash_function() { return set_type::hash_function(); }
+  static constexpr key_equal key_eq() { return set_type::key_eq(); }
   //@}
 
   //@{ Friends

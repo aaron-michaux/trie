@@ -11,6 +11,8 @@
 
 namespace niggly::trie::test {
 
+using namespace std::string_literals;
+
 class TracedItem {
 private:
   uint32_t& counter_;
@@ -709,19 +711,19 @@ template <typename SetType> void trie_ops_test() {
   CATCH_REQUIRE(counter == 0);
 }
 
-CATCH_TEST_CASE("trie_ops", "[trie_ops]") {
+CATCH_TEST_CASE("trie_set_ops", "[trie_set_ops]") {
   trie_ops_test<TracedItemSetType>();
   trie_ops_test<MoveTracedItemSetType>();
   trie_ops_test<TrivialTracedItemSetType>();
 }
 
-CATCH_TEST_CASE("trie_default_construct", "[trie_default_construct]") {
+CATCH_TEST_CASE("trie_set_default_construct", "[trie_set_default_construct]") {
   using set_type = persistent_set<TracedItem>;
   auto set = std::make_unique<set_type>();
   CATCH_REQUIRE(set->size() == 0);
 }
 
-CATCH_TEST_CASE("trie_insert", "[trie_insert]") {
+CATCH_TEST_CASE("trie_set_insert", "[trie_set_insert]") {
   using set_type = persistent_set<int>;
   std::vector<int> values{{1, 2, 3}};
   set_type set{std::begin(values), std::end(values)};
@@ -748,7 +750,7 @@ CATCH_TEST_CASE("trie_insert", "[trie_insert]") {
   CATCH_REQUIRE(set.size() == 7);
 }
 
-CATCH_TEST_CASE("trie_insert_const_ref", "[trie_insert_const_ref]") {
+CATCH_TEST_CASE("trie_set_insert_const_ref", "[trie_set_insert_const_ref]") {
   using set_type = persistent_set<TracedItem, TracedItem::Hasher>;
   uint32_t counter = 0;
   {
@@ -760,7 +762,7 @@ CATCH_TEST_CASE("trie_insert_const_ref", "[trie_insert_const_ref]") {
   CATCH_REQUIRE(counter == 0);
 }
 
-CATCH_TEST_CASE("trie_extract", "[trie_extract]") {
+CATCH_TEST_CASE("trie_set_extract", "[trie_set_extract]") {
   using set_type = persistent_set<int>;
   set_type set{{1, 2, 3}};
   auto x = set.extract(2);
@@ -771,7 +773,7 @@ CATCH_TEST_CASE("trie_extract", "[trie_extract]") {
   CATCH_REQUIRE(*x == 2);
 }
 
-CATCH_TEST_CASE("trie_ilist", "[trie_ilist]") {
+CATCH_TEST_CASE("trie_set_ilist", "[trie_set_ilist]") {
   using set_type = persistent_set<int>;
   std::vector<int> values{{1, 2, 3}};
   set_type set{{1, 2, 3}};
@@ -780,7 +782,7 @@ CATCH_TEST_CASE("trie_ilist", "[trie_ilist]") {
     CATCH_REQUIRE(set.contains(value));
 }
 
-CATCH_TEST_CASE("trie_op=", "[trie_op=]") {
+CATCH_TEST_CASE("trie_set_op=", "[trie_set_op=]") {
   using set_type = persistent_set<int>;
   set_type set{{1, 2, 3}};
   set_type other;
@@ -794,7 +796,7 @@ CATCH_TEST_CASE("trie_op=", "[trie_op=]") {
   CATCH_REQUIRE(other.contains(2));
 }
 
-CATCH_TEST_CASE("trie_op==", "[trie_op==]") {
+CATCH_TEST_CASE("trie_set_op==", "[trie_set_op==]") {
   using set_type = persistent_set<int>;
   set_type set{{1, 2, 3}};
   set_type other;
@@ -802,11 +804,25 @@ CATCH_TEST_CASE("trie_op==", "[trie_op==]") {
   CATCH_REQUIRE(other == other);
   CATCH_REQUIRE(set != other);
   CATCH_REQUIRE(other != set);
-  set = other;
+  other = set;
   CATCH_REQUIRE(other == set);
+
+  CATCH_REQUIRE(set.size() == 3);
+  CATCH_REQUIRE(other.size() == 3);
+
+  other.clear();
+  CATCH_REQUIRE(set.size() == 3);
+  CATCH_REQUIRE(other.size() == 0);
+  CATCH_REQUIRE(other != set);
+  other.insert(std::begin(set), std::end(set));
+  CATCH_REQUIRE(other == set);
+
+  other.erase(3);
+  other.insert(4);
+  CATCH_REQUIRE(other != set);
 }
 
-CATCH_TEST_CASE("trie_swap", "[trie_swap]") {
+CATCH_TEST_CASE("trie_set_swap", "[trie_set_swap]") {
   using set_type = persistent_set<int>;
   set_type set{{1, 2, 3}};
   set_type other;
@@ -829,13 +845,13 @@ CATCH_TEST_CASE("trie_swap", "[trie_swap]") {
   CATCH_REQUIRE(other.size() == 0);
 }
 
-CATCH_TEST_CASE("trie_hash_func", "[trie_hash_func]") {
+CATCH_TEST_CASE("trie_set_hash_func", "[trie_set_hash_func]") {
   using set_type = persistent_set<int>;
   auto func = set_type::hasher{};
   CATCH_REQUIRE(set_type::hash_function()(1) == func(1));
 }
 
-CATCH_TEST_CASE("trie_key_eq_func", "[trie_key_eq_func]") {
+CATCH_TEST_CASE("trie_set_key_eq_func", "[trie_set_key_eq_func]") {
   using set_type = persistent_set<int>;
   CATCH_REQUIRE(set_type::key_eq()(1, 1));
   CATCH_REQUIRE(!set_type::key_eq()(1, 2));
@@ -892,6 +908,7 @@ CATCH_TEST_CASE("trie_map_op=", "[trie_map_op=]") {
 
   CATCH_REQUIRE(map.size() == other.size());
   CATCH_REQUIRE(map.size() == 3);
+  CATCH_REQUIRE(map.size() < map_type::max_size());
   CATCH_REQUIRE(map == other);
   CATCH_REQUIRE(map != other2);
   CATCH_REQUIRE(other2.size() == 0);
@@ -914,7 +931,6 @@ CATCH_TEST_CASE("trie_map_op=", "[trie_map_op=]") {
 }
 
 CATCH_TEST_CASE("trie_map_move=", "[trie_map_move=]") {
-  using namespace std::string_literals;
   using map_type = persistent_map<std::string, int>;
   std::vector<map_type::item_type> values{{{"one"s, 1}, {"two"s, 2}, {"three"s, 3}}};
 
@@ -941,6 +957,136 @@ CATCH_TEST_CASE("trie_map_move=", "[trie_map_move=]") {
     CATCH_REQUIRE(!other.contains(key));
     CATCH_REQUIRE(*map.find(key) == value);
   }
+}
+
+CATCH_TEST_CASE("trie_map_op==", "[trie_map_op==]") {
+  using map_type = persistent_map<int, std::string>;
+  map_type map{{{0, "a"s}, {1, "b"s}, {2, "c"s}}};
+  map_type other;
+
+  CATCH_REQUIRE(map == map);
+  CATCH_REQUIRE(other == other);
+  CATCH_REQUIRE(map != other);
+  CATCH_REQUIRE(other != map);
+  other = map;
+  CATCH_REQUIRE(other == map);
+
+  CATCH_REQUIRE(map.size() == 3);
+  CATCH_REQUIRE(other.size() == 3);
+
+  other.clear();
+  CATCH_REQUIRE(map.size() == 3);
+  CATCH_REQUIRE(other.size() == 0);
+  CATCH_REQUIRE(other != map);
+  other.insert(std::begin(map), std::end(map));
+  CATCH_REQUIRE(other == map);
+
+  other.erase(2);
+  CATCH_REQUIRE(other.size() == 2);
+  other.insert({3, "d"s});
+  CATCH_REQUIRE(other.size() == 3);
+  CATCH_REQUIRE(other != map);
+}
+
+CATCH_TEST_CASE("trie_map_swap", "[trie_map_swap]") {
+  using map_type = persistent_map<int, std::string>;
+  map_type map{{{0, "a"s}, {1, "b"s}, {2, "c"s}}};
+  map_type other;
+
+  CATCH_REQUIRE(other.size() == 0);
+  other.swap(other);
+  CATCH_REQUIRE(other.size() == 0);
+
+  CATCH_REQUIRE(map.size() == 3);
+  map.swap(map);
+  CATCH_REQUIRE(map.size() == 3);
+
+  map.swap(other);
+  CATCH_REQUIRE(map.size() == 0);
+  CATCH_REQUIRE(other.size() == 3);
+
+  using std::swap;
+  swap(map, other);
+  CATCH_REQUIRE(map.size() == 3);
+  CATCH_REQUIRE(other.size() == 0);
+}
+
+CATCH_TEST_CASE("trie_map_insert", "[trie_map_insert]") {
+  using map_type = persistent_map<std::string, std::string>;
+  std::vector<map_type::item_type> items{{{"A"s, "a"s}, {"B"s, "b"s}, {"C"s, "c"s}}};
+  map_type map;
+
+  CATCH_REQUIRE(map.size() == 0);
+  for (const auto& item : items) {
+    auto duplicate = item;
+    auto key = item.first;
+    CATCH_REQUIRE(!map.contains(key));
+    CATCH_REQUIRE(map.insert(item));
+    CATCH_REQUIRE(map.contains(key));
+    CATCH_REQUIRE(!map.insert(item));
+    CATCH_REQUIRE(map.erase(key) == 1);
+    CATCH_REQUIRE(map.insert(std::move(duplicate)));
+    CATCH_REQUIRE(map.contains(key));
+    CATCH_REQUIRE(duplicate.first.size() == 0);
+  }
+
+  CATCH_REQUIRE(map.size() == items.size());
+  map.clear();
+  for (const auto& [key, value] : items) {
+    CATCH_REQUIRE(!map.contains(key));
+    CATCH_REQUIRE(map.at(key) == nullptr);
+    CATCH_REQUIRE_THROWS_AS(map[key], std::out_of_range);
+  }
+
+  CATCH_REQUIRE(map.size() == 0);
+  map.insert(std::begin(items), std::end(items));
+  CATCH_REQUIRE(map.size() == 3);
+  CATCH_REQUIRE(items[0].first == "A"s);
+  CATCH_REQUIRE(items[0].second == "a"s);
+  for (const auto& [key, value] : items) {
+    CATCH_REQUIRE(map.contains(key));
+    CATCH_REQUIRE(map.at(key) != nullptr);
+    CATCH_REQUIRE(*map.at(key) == value);
+    CATCH_REQUIRE(map[key] == value);
+  }
+}
+
+CATCH_TEST_CASE("trie_map_insert_ilist", "[trie_map_insert_ilist]") {
+  using map_type = persistent_map<std::string, std::string>;
+  map_type map;
+  map.insert({{"A"s, "a"s}, {"B"s, "b"s}, {"C"s, "c"s}});
+  CATCH_REQUIRE(map.size() == 3);
+}
+
+CATCH_TEST_CASE("trie_map_erase_if", "[trie_map_erase_if]") {
+  using map_type = persistent_map<int, std::string>;
+  map_type map{{{0, "a"s}, {1, "b"s}, {2, "c"s}, {3, "d"s}}};
+  CATCH_REQUIRE(map.size() == 4);
+
+  auto predicate = [](int key) { return key % 2 == 0; };
+  map_type other = map.erase_if(predicate);
+  CATCH_REQUIRE(map.size() == 4);
+  CATCH_REQUIRE(other.size() == 2);
+  CATCH_REQUIRE(map != other);
+
+  for (const auto& [key, value] : map)
+    CATCH_REQUIRE(other.contains(key) == !predicate(key));
+
+  erase_if(map, predicate);
+  CATCH_REQUIRE(map.size() == 2);
+  CATCH_REQUIRE(map == other);
+}
+
+CATCH_TEST_CASE("trie_map_hash_func", "[trie_map_hash_func]") {
+  using map_type = persistent_map<int, int>;
+  auto func = map_type::hasher{};
+  CATCH_REQUIRE(map_type::hash_function()(1) == func(1));
+}
+
+CATCH_TEST_CASE("trie_map_key_eq_func", "[trie_map_key_eq_func]") {
+  using map_type = persistent_map<int, int>;
+  CATCH_REQUIRE(map_type::key_eq()(1, 1));
+  CATCH_REQUIRE(!map_type::key_eq()(1, 2));
 }
 
 } // namespace niggly::trie::test

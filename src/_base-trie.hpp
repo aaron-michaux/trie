@@ -64,8 +64,12 @@ public:
   template <typename Predicate> constexpr base_set erase_if(Predicate predicate) {
     auto copy = *this;
     for (const auto& item : *this) {
-      if (predicate(item)) {
-        copy.erase(item);
+      if constexpr (IsMap) {
+        if (predicate(item.first))
+          copy.erase(item.first);
+      } else {
+        if (predicate(item))
+          copy.erase(item);
       }
     }
     return copy;
@@ -173,20 +177,29 @@ public:
 
   //@{ Friends
   friend constexpr bool operator==(const base_set& lhs, const base_set& rhs) noexcept {
-    return lhs.root_ == rhs.root_;
+    if (lhs.size() != rhs.size())
+      return false;
+
+    if (lhs.root_ == rhs.root_)
+      return true;
+
+    if constexpr (IsMap) {
+      for (const auto& [key, value] : lhs) {
+        if (!rhs.contains(key))
+          return false;
+      }
+    } else {
+      for (const auto& item : lhs) {
+        if (!rhs.contains(item))
+          return false;
+      }
+    }
+
+    return true;
   }
 
   friend constexpr bool operator!=(const base_set& lhs, const base_set& rhs) noexcept {
     return !(lhs == rhs);
-  }
-
-  friend constexpr void swap(base_set& lhs, base_set& rhs) noexcept { lhs.swap(rhs); }
-
-  template <typename Predicate>
-  friend constexpr size_type erase_if(base_set& set, Predicate predicate) {
-    const auto size_0 = set.size();
-    set = set.erase_if(std::forward<Predicate>(predicate));
-    return size_0 - set.size();
   }
   //@}
 

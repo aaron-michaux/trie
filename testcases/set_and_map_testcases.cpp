@@ -1,7 +1,8 @@
 
 #include <catch2/catch.hpp>
 
-#include "trie-set.hpp"
+#include "persistent-set.hpp"
+#include "persistent-map.hpp"
 
 #include <fmt/format.h>
 

@@ -5,8 +5,10 @@
 #include <fmt/format.h>
 
 #include <chrono>
+#include <fstream>
 #include <functional>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -207,16 +209,43 @@ Data run_items(std::string label, const std::size_t size, const uint32_t sample_
 }
 
 template <typename key_type, typename value_type, typename key_hasher = std::hash<key_type>>
-void run_types(std::string label, std::size_t size0, std::size_t max_size, uint32_t sample_size) {
+void run_types(std::ostream& os, std::string label, std::size_t size0, std::size_t max_size,
+               uint32_t sample_size) {
+  // collect all the data
+  std::vector<Data> data;
+  for (std::size_t size = size0; size <= max_size; size *= 2)
+    data.push_back(run_items<key_type, value_type, key_hasher>(label, size, sample_size));
 
-  for (std::size_t size = size0; size <= max_size; size *= 2) {
-    run_items<key_type, value_type, key_hasher>(label, size, sample_size);
+  // const auto& headers = data[0].columns;
+
+  auto output = [&](std::string op_type, auto fn) {
+    os << fmt::format("{}_{}\t{}\n", label, op_type, fmt::join(data[0].columns, "\t"));
+    for (const auto& datum : data)
+      os << fmt::format("{}\t{}\n", datum.size, fmt::join(fn(datum), "\t"));
+    os << "\n";
+  };
+
+  output("insert", std::mem_fn(&Data::insert_times));
+  output("iterate", std::mem_fn(&Data::iterate_times));
+  output("find", std::mem_fn(&Data::find_times));
+  output("delete", std::mem_fn(&Data::delete_times));
+}
+
+void run_benchmark(std::string filename) {
+  const std::size_t min_size = 1000;
+  const std::size_t max_size = 2000000;
+  const uint32_t sample_size = 20;
+  std::fstream file(filename, file.out);
+  if (!file.is_open()) {
+    std::cerr << fmt::format("failed to open file '{}'\n", filename);
+    std::exit(1);
   }
+
+  run_types<int, int>(file, "integer", min_size, max_size, sample_size);
+  run_types<std::string, int>(file, "string", min_size, max_size, sample_size);
+
+  file.close();
+  std::cout << fmt::format("Benchmark results collated in '{}'\n", filename);
 }
 
-void run_benchmark() {
-  run_types<int, int>("integer ", 1000, 4000, 20);
-  run_types<std::string, int>("string  ", 1000, 4000, 20);
-}
-
-int main(int argc, char* argv[]) { run_benchmark(); }
+int main(int argc, char* argv[]) { run_benchmark("/tmp/benchmark-data.csv"); }

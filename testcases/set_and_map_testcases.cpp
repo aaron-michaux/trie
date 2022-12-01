@@ -1,8 +1,8 @@
 
 #include <catch2/catch.hpp>
 
-#include "persistent-set.hpp"
-#include "persistent-map.hpp"
+#include "niggly/persistent-set.hpp"
+#include "niggly/persistent-map.hpp"
 
 #include <fmt/format.h>
 

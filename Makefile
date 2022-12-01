@@ -1,7 +1,7 @@
 
 # These will be set from the outside
 TARGET?=trie
-SOURCES?=$(shell find src -type f -name '*.cpp' -o -name '*.c')
+SOURCES?=
 TOOLCHAIN_NAME?=gcc-11
 TOOLCHAIN_CONFIG?=release
 STATIC_LIBCPP?=0
@@ -17,7 +17,7 @@ CXXSTD?=-std=c++2b
 
 ifneq ("$(BUILD_TESTS)", "0")
   SOURCES+= $(shell find testcases -type f -name '*.cpp' -o -name '*.c')
-  CPPFLAGS+= -DCATCH_BUILD -DCATCH_CONFIG_PREFIX_ALL -DCATCH_CONFIG_COLOUR_ANSI -isystemtestcases
+  CPPFLAGS+= -DTESTCASE_BUILD -DCATCH_BUILD -DCATCH_CONFIG_PREFIX_ALL -DCATCH_CONFIG_COLOUR_ANSI -isystemtestcases
 endif
 
 ifneq ("$(BUILD_EXAMPLES)", "0")
@@ -28,7 +28,6 @@ endif
 ifneq ("$(BENCHMARK)", "0")
   SOURCES+= $(shell find benchmark -type f -name '*.cpp' -o -name '*.c')
   CPPFLAGS+= -DBENCHMARK_BUILD
-  LDFLAGS+= -L/usr/local/lib -lbenchmark
 endif
 
 BOOST_DEFINES:=-DBOOST_NO_TYPEID -DBOOST_ERROR_CODE_HEADER_ONLY -DBOOST_ASIO_SEPARATE_COMPILATION -DBOOST_ASIO_NO_DEPRECATED -DBOOST_ASIO_DISABLE_VISIBILITY
@@ -36,7 +35,7 @@ DEFINES:=$(BOOST_DEFINES) -DUSE_ASIO
 WARNINGS:=-Wno-variadic-macros
 
 # Configure includes
-INCDIRS:=-Isrc -isystemcontrib/include -isystem/usr/local/include
+INCDIRS:=-Iinclude -isystemcontrib/include -isystem/usr/local/include
 LDFLAGS+=
 CFLAGS+= $(INCDIRS) $(DEFINES)
 CXXFLAGS+= -DFMT_HEADER_ONLY $(INCDIRS) $(DEFINES) $(WARNINGS)

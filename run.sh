@@ -107,8 +107,9 @@ while [ "$#" -gt "0" ] ; do
     [ "$1" = "lto" ]       && LTO="1"          && shift && continue
     [ "$1" = "no-lto" ]    && LTO="0"          && shift && continue
     [ "$1" = "build" ]     && BUILD_ONLY="1"   && shift && continue    
-    [ "$1" = "test" ]      && BUILD_TESTS="1"  && BUILD_EXAMPLES=1 && shift && continue
-    [ "$1" = "bench" ]     && BENCHMARK=1      && shift && continue
+    [ "$1" = "test" ]      && BUILD_TESTS="1"  && BUILD_EXAMPLES="1" && shift && continue
+    [ "$1" = "bench" ]     && BENCHMARK="1"    && BUILD_TESTS="0"    && shift && continue
+    [ "$1" = "benchmark" ] && BENCHMARK="1"    && BUILD_TESTS="0"    && shift && continue
     [ "$1" = "examples" ]  && BUILD_EXAMPLES=1 && shift && continue
     [ "$1" = "coverage" ]  && RULE="coverage"  \
         && BUILD_TESTS=1 && COVERAGE=1 && COVERAGE_HTML=0 && CONFIG=debug && shift && continue
@@ -119,7 +120,7 @@ while [ "$#" -gt "0" ] ; do
     
     [ "$1" = "--" ]        && shift && break
     
-    break
+    echo "Unexpected keyword: '$1'" 1>&2 && exit 1
 done
 
 if [ "$TOOLCHAIN" = "emcc" ] ; then
@@ -162,7 +163,10 @@ export BUILD_TESTS="${BUILD_TESTS}"
 export BUILD_EXAMPLES="${BUILD_EXAMPLES}"
 export BENCHMARK="${BENCHMARK}"
 
-if [ "$COVERAGE" = "1" ] || [ "$COVERAGE_HTML" = "1" ] ; then
+if [ "$BENCHMARK" = "1" ] ; then
+    export TARGET="trie-benchmark"
+
+elif [ "$COVERAGE" = "1" ] || [ "$COVERAGE_HTML" = "1" ] ; then
     if [ "$TOOL" != "gcc" ] && [ "$COVERAGE_HTML" = "0" ]; then        
         echo "coverage only supported with gcc (TOOL=$TOOL)" 1>&2
         exit 1
@@ -177,19 +181,15 @@ if [ "$COVERAGE" = "1" ] || [ "$COVERAGE_HTML" = "1" ] ; then
         COVERAGE_LINK="-fprofile-instr-generate"
         RULE="llvm_coverage_html"
     fi
+    export TARGET="trie-coverage"
     export CFLAGS="$CXXFLAGS $COVERAGE_FLAGS"
     export CXXFLAGS="$CXXFLAGS $COVERAGE_FLAGS"
     export LDFLAGS="$CXXFLAGS $COVERAGE_LINK"
+
+elif [ "$BUILD_TESTS" = "1" ] ; then
+    export TARGET="trie-test"
+    
 fi
-
-export SRC_DIRECTORIES="src"
-
-# export VERSION_HASH="$(git log | grep commit | head -n 1 | awk '{ print $2 }')"
-# export VERSION_CRC32="$(echo -n $VERSION_HASH | gzip -c | tail -c8 | hexdump -n4 -e '"%u"')"
-# export VERSION_DEFINES="-DVERSION_HASH=\"\\\"$VERSION_HASH\"\\\""
-# export CPPFLAGS="$CPPFLAGS $VERSION_DEFINES"
-
-[ "$TARGET_FILE" = "build.ninja" ] && exit 0
 
 [ "$(uname)" = "Darwin" ] && NPROC="$(sysctl -n hw.ncpu)" || NPROC="$(nproc)"
 

@@ -260,8 +260,10 @@ void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
 
   {
     std::size_t counter = 0;
+    auto start = set.begin();
     for (auto ii = set.begin(); ii != set.end(); ++ii) {
       CATCH_REQUIRE(is_value((*ii).value()));
+      CATCH_REQUIRE(static_cast<std::size_t>(ii - start) == counter);
       ++counter;
     }
     CATCH_REQUIRE(counter == values.size());
@@ -288,10 +290,12 @@ void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
 
   {
     std::size_t counter = 0;
+    auto end = set.end();
     for (auto ii = set.end(); ii != set.begin();) {
       --ii;
       CATCH_REQUIRE(is_value((*ii).value()));
       ++counter;
+      CATCH_REQUIRE(static_cast<std::size_t>(end - ii) == counter);
     }
     CATCH_REQUIRE(counter == values.size());
   }
@@ -318,8 +322,8 @@ void check_trie_iterators(Set& set, ForwardItr start, ForwardItr finish) {
   { // Should be able to move before the start, without effect
     std::size_t counter = 0;
     auto start = set.cbegin();
-    --start; // start should now be end!
-    CATCH_REQUIRE(start == set.cend());
+    --start; // should now be a no-op
+    CATCH_REQUIRE(start == set.cbegin());
   }
 
   { // Test postincrement

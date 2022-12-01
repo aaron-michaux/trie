@@ -147,6 +147,14 @@ UNIQUE_DIR="${TOOLCHAIN}-${CONFIG}"
 [ "$BENCHMARK" = "1" ]   && UNIQUE_DIR="bench-${UNIQUE_DIR}"
 [ "$COVERAGE" = "1" ] || [ "$COVERAGE_HTML" = "1" ] && UNIQUE_DIR="coverage-${UNIQUE_DIR}"
 
+if [ "$BENCHMARK" = "1" ] ; then
+    export TARGET="trie-benchmark"
+elif [ "$COVERAGE" = "1" ] || [ "$COVERAGE_HTML" = "1" ] ; then
+    export TARGET="trie-coverage"
+elif [ "$BUILD_TESTS" = "1" ] ; then
+    export TARGET="trie-test"    
+fi
+
 export BUILDDIR="/tmp/build-${USER}/${UNIQUE_DIR}/${TARGET_FILE}"
 export TARGETDIR="build/${UNIQUE_DIR}"
 
@@ -163,10 +171,7 @@ export BUILD_TESTS="${BUILD_TESTS}"
 export BUILD_EXAMPLES="${BUILD_EXAMPLES}"
 export BENCHMARK="${BENCHMARK}"
 
-if [ "$BENCHMARK" = "1" ] ; then
-    export TARGET="trie-benchmark"
-
-elif [ "$COVERAGE" = "1" ] || [ "$COVERAGE_HTML" = "1" ] ; then
+if [ "$COVERAGE" = "1" ] || [ "$COVERAGE_HTML" = "1" ] ; then
     if [ "$TOOL" != "gcc" ] && [ "$COVERAGE_HTML" = "0" ]; then        
         echo "coverage only supported with gcc (TOOL=$TOOL)" 1>&2
         exit 1
@@ -181,14 +186,9 @@ elif [ "$COVERAGE" = "1" ] || [ "$COVERAGE_HTML" = "1" ] ; then
         COVERAGE_LINK="-fprofile-instr-generate"
         RULE="llvm_coverage_html"
     fi
-    export TARGET="trie-coverage"
     export CFLAGS="$CXXFLAGS $COVERAGE_FLAGS"
     export CXXFLAGS="$CXXFLAGS $COVERAGE_FLAGS"
     export LDFLAGS="$CXXFLAGS $COVERAGE_LINK"
-
-elif [ "$BUILD_TESTS" = "1" ] ; then
-    export TARGET="trie-test"
-    
 fi
 
 [ "$(uname)" = "Darwin" ] && NPROC="$(sysctl -n hw.ncpu)" || NPROC="$(nproc)"

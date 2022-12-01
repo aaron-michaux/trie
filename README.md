@@ -20,12 +20,11 @@ Directory: .
 ------------------------------------------------------------------------------
 File                                       Lines    Exec  Cover   Missing
 ------------------------------------------------------------------------------
-src/bits/trie-base.hpp                       585     585   100%   
-src/main.cpp                                   3       3   100%   
-src/persistent-map.hpp                        62      62   100%   
-src/persistent-set.hpp                        52      52   100%   
+include/niggly/bits/trie-base.hpp            591     591   100%   
+include/niggly/persistent-map.hpp             62      62   100%   
+include/niggly/persistent-set.hpp             52      52   100%   
 ------------------------------------------------------------------------------
-TOTAL                                        702     702   100%
+TOTAL                                        705     705   100%
 ------------------------------------------------------------------------------
 ```
 

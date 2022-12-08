@@ -826,7 +826,7 @@ struct NodeOps {
     if (leaf_index != NotAnIndex) {
       return root; // (2.a) Duplicate!
     }
-    return finish_insert(hash, path, std::forward<ItemType>(item));
+    return finish_insert(root, hash, path, std::forward<ItemType>(item));
   }
 
   template <typename K, typename V>
@@ -858,12 +858,13 @@ struct NodeOps {
         dec_ref(path.leaf_end); // rewrite_branch_path doesn't know to let this node go
       return ret;
     }
-    return finish_insert(hash, path, item_type{std::forward<K>(key), std::forward<V>(value)});
+    return finish_insert(root, hash, path, item_type{std::forward<K>(key), std::forward<V>(value)});
   }
 
   template <typename ItemType>
-  static constexpr node_ptr_type finish_insert(hash_type hash, const TreePath& path,
-                                               ItemType&& item) {
+  static constexpr node_ptr_type finish_insert(node_ptr_type old_root, hash_type hash,
+                                               const TreePath& path, ItemType&& item) {
+
     if (path.leaf_end == nullptr) {
       auto new_leaf = Leaf::make(std::forward<ItemType>(item));
       return rewrite_branch_path(path, hash, new_leaf, new_leaf);
@@ -873,7 +874,14 @@ struct NodeOps {
                          path.size,                     // The path starts here
                          path.leaf_end,                 // Includes this node
                          std::forward<ItemType>(item)); // Must include this new value
-    return rewrite_branch_path(path, hash, new_branch, leaf_end);
+    auto new_root = rewrite_branch_path(path, hash, new_branch, leaf_end);
+    if (type(old_root) == NodeType::Leaf && type(new_root) == NodeType::Branch) {
+      // If `old_root` is a Leaf, and `new_root` is a Branch, then `old_root`
+      // must have be placed as a descendent of `new_root` somewhere. This means
+      // that `old_root` is used in two different trees!
+      add_ref(old_root);
+    }
+    return new_root;
   }
 
   static constexpr const item_type* find(node_const_ptr_type root, const key_type& key) {
@@ -1152,6 +1160,7 @@ public:
 private:
   node_ptr_type root_{nullptr}; //!< Root of the tree could be branch of leaf
   std::size_t size_{0};         //!< Current size of the Set
+  std::mutex padlock_;          //!< Otherwise
 
 public:
   //@{ Construction/Destruction
@@ -1329,15 +1338,8 @@ private:
     const bool success = (new_root != root_);
 
     if (success) {
-      if (root_ != nullptr && Ops::type(root_) == NodeType::Leaf &&
-          Ops::type(new_root) == NodeType::Branch) {
-        // Never `dec_ref` a root_ "leaf node", when new_root is a Branch
-        // because that leaf will have become part of the tree.
-        //
-        // If new_root is a branch then there was a collision at the root
-      } else {
+      if (root_ != nullptr)
         Ops::dec_ref(root_);
-      }
       root_ = new_root;
       ++size_;
     }
